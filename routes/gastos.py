@@ -14,6 +14,9 @@ CATEGORIAS = [
     ('salud',          '🏥 Salud'),
     ('viajes',         '✈️ Viajes'),
     ('ropa',           '👗 Ropa'),
+    ('mascotas',       '🐾 Mascotas'),
+    ('casa',           '🏠 Casa'),
+    ('bebe',           '👶 Bebé'),
     ('otros',          '📦 Otros'),
 ]
 
