@@ -27,17 +27,22 @@
       {% for g in gastos %}
       <tr>
         <td>
-          {{ g.descripcion }}
+          <a href="{{ url_for('gastos.detalle', gasto_id=g.id) }}" class="link-detalle">{{ g.descripcion }}</a>
           {% if g.notas %}<span class="nota-tip" title="{{ g.notas }}">ℹ️</span>{% endif %}
         </td>
         <td><span class="badge badge-cat">{{ g.categoria }}</span></td>
-        <td>{{ g['nombre_' + g.pagado_por] if 'nombre_' + g.pagado_por in g else (cfg.nombre_persona1 if g.pagado_por == 'persona1' else cfg.nombre_persona2) }}</td>
+        <td>
+          {% if g.pagado_por == 'persona1' %}{{ cfg.nombre_persona1 }}
+          {% elif g.pagado_por == 'persona2' %}{{ cfg.nombre_persona2 }}
+          {% else %}<span class="badge badge-abono">Abonos</span>{% endif %}
+        </td>
         <td>${{ "%.2f"|format(g.monto_total) }}</td>
         <td>${{ "%.2f"|format(g.monto_total / g.meses_diferidos) }}</td>
         <td>{{ g.mes_inicio.strftime('%b %Y') }}</td>
         <td>{{ g.meses_diferidos }}</td>
         <td class="text-muted">{{ g.fecha_registro.strftime('%d/%m/%Y') }}</td>
         <td class="actions">
+          <a href="{{ url_for('gastos.detalle', gasto_id=g.id) }}" class="btn-sm btn-edit">Ver</a>
           <a href="{{ url_for('gastos.editar', gasto_id=g.id) }}" class="btn-sm btn-edit">Editar</a>
           <form method="POST" action="{{ url_for('gastos.eliminar', gasto_id=g.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este gasto?')">
             <button type="submit" class="btn-sm btn-delete">Eliminar</button>

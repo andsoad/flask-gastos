@@ -33,9 +33,9 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="pagado_por">¿Quién pagó? *</label>
-        <select id="pagado_por" name="pagado_por" required>
-          <option value="">— Selecciona —</option>
+        <label for="pagado_por">¿Quién pagó? <span class="text-muted">(opcional si usarás abonos)</span></label>
+        <select id="pagado_por" name="pagado_por">
+          <option value="">— Sin pagador (usar abonos) —</option>
           <option value="persona1" {% if gasto and gasto.pagado_por == 'persona1' %}selected{% endif %}>{{ cfg.nombre_persona1 }}</option>
           <option value="persona2" {% if gasto and gasto.pagado_por == 'persona2' %}selected{% endif %}>{{ cfg.nombre_persona2 }}</option>
         </select>

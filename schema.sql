@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     descripcion     VARCHAR(255)   NOT NULL,
     monto_total     DECIMAL(10,2)  NOT NULL,
     categoria       VARCHAR(50)    NOT NULL,
-    pagado_por      ENUM('persona1','persona2') NOT NULL,
+    pagado_por      ENUM('persona1','persona2') DEFAULT NULL COMMENT 'NULL = gasto con abonos individuales',
     mes_inicio      DATE           NOT NULL  COMMENT 'YYYY-MM-01: primer mes del gasto',
     meses_diferidos INT            NOT NULL DEFAULT 1,
     fecha_registro  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +70,23 @@ CREATE TABLE IF NOT EXISTS pagos_extra (
     creado_por     INT            NOT NULL,
     FOREIGN KEY (creado_por) REFERENCES usuarios(id)
 );
+
+-- ------------------------------------------------------------
+-- Abonos a gastos (pagos parciales de cada persona a un gasto)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS abonos_gasto (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    gasto_id       INT            NOT NULL,
+    persona        ENUM('persona1','persona2') NOT NULL,
+    monto          DECIMAL(10,2)  NOT NULL,
+    fecha_registro DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notas          TEXT,
+    creado_por     INT            NOT NULL,
+    FOREIGN KEY (gasto_id)   REFERENCES gastos(id) ON DELETE CASCADE,
+    FOREIGN KEY (creado_por) REFERENCES usuarios(id)
+);
+
+CREATE INDEX idx_abonos_gasto ON abonos_gasto(gasto_id);
 
 -- ------------------------------------------------------------
 -- Índices

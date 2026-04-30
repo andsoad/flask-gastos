@@ -31,11 +31,15 @@ def calcular_balance_mes(year, month):
 
     # Traer todos los gastos cuyo rango de meses incluye este mes
     cur.execute("""
-        SELECT id, descripcion, monto_total, categoria, pagado_por,
-               mes_inicio, meses_diferidos
-        FROM gastos
-        WHERE mes_inicio <= %s
-          AND DATE_ADD(mes_inicio, INTERVAL (meses_diferidos - 1) MONTH) >= %s
+        SELECT g.id, g.descripcion, g.monto_total, g.categoria, g.pagado_por,
+               g.mes_inicio, g.meses_diferidos,
+               COALESCE(SUM(CASE WHEN a.persona='persona1' THEN a.monto ELSE 0 END), 0) AS abono_p1,
+               COALESCE(SUM(CASE WHEN a.persona='persona2' THEN a.monto ELSE 0 END), 0) AS abono_p2
+        FROM gastos g
+        LEFT JOIN abonos_gasto a ON a.gasto_id = g.id
+        WHERE g.mes_inicio <= %s
+          AND DATE_ADD(g.mes_inicio, INTERVAL (g.meses_diferidos - 1) MONTH) >= %s
+        GROUP BY g.id
     """, (mes_actual, mes_actual))
     gastos_raw = cur.fetchall()
 
@@ -44,22 +48,42 @@ def calcular_balance_mes(year, month):
     total_p2 = 0.0
 
     for g in gastos_raw:
-        cuota = round(float(g['monto_total']) / g['meses_diferidos'], 2)
-        mitad = round(cuota / 2, 2)
-        gastos_mes.append({
-            'id':           g['id'],
-            'descripcion':  g['descripcion'],
-            'categoria':    g['categoria'],
-            'pagado_por':   g['pagado_por'],
-            'monto_total':  float(g['monto_total']),
-            'meses_diferidos': g['meses_diferidos'],
-            'cuota_mes':    cuota,
-            'mitad':        mitad,
-        })
-        if g['pagado_por'] == 'persona1':
-            total_p1 += cuota
+        cuota    = round(float(g['monto_total']) / g['meses_diferidos'], 2)
+        mitad    = round(cuota / 2, 2)
+        abono_p1 = round(float(g['abono_p1']) / g['meses_diferidos'], 2)
+        abono_p2 = round(float(g['abono_p2']) / g['meses_diferidos'], 2)
+
+        # Si hay abonos, usar los abonos como lo pagado; si no, usar pagado_por
+        if abono_p1 > 0 or abono_p2 > 0:
+            pago_p1 = abono_p1
+            pago_p2 = abono_p2
+        elif g['pagado_por'] == 'persona1':
+            pago_p1 = cuota
+            pago_p2 = 0.0
+        elif g['pagado_por'] == 'persona2':
+            pago_p1 = 0.0
+            pago_p2 = cuota
         else:
-            total_p2 += cuota
+            pago_p1 = 0.0
+            pago_p2 = 0.0
+
+        gastos_mes.append({
+            'id':            g['id'],
+            'descripcion':   g['descripcion'],
+            'categoria':     g['categoria'],
+            'pagado_por':    g['pagado_por'],
+            'monto_total':   float(g['monto_total']),
+            'meses_diferidos': g['meses_diferidos'],
+            'cuota_mes':     cuota,
+            'mitad':         mitad,
+            'abono_p1':      abono_p1,
+            'abono_p2':      abono_p2,
+            'pago_p1':       pago_p1,
+            'pago_p2':       pago_p2,
+            'tiene_abonos':  abono_p1 > 0 or abono_p2 > 0,
+        })
+        total_p1 += pago_p1
+        total_p2 += pago_p2
 
     # Pagos extra del mes
     cur.execute("""
