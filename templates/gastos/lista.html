@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Gastos{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Todos los gastos</h2>
+  <a href="{{ url_for('gastos.nuevo') }}" class="btn btn-primary">+ Nuevo gasto</a>
+</div>
+
+{% if gastos %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Descripción</th>
+        <th>Categoría</th>
+        <th>Pagó</th>
+        <th>Monto total</th>
+        <th>Cuota/mes</th>
+        <th>Mes inicio</th>
+        <th>Meses</th>
+        <th>Registrado</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in gastos %}
+      <tr>
+        <td>
+          {{ g.descripcion }}
+          {% if g.notas %}<span class="nota-tip" title="{{ g.notas }}">ℹ️</span>{% endif %}
+        </td>
+        <td><span class="badge badge-cat">{{ g.categoria }}</span></td>
+        <td>{{ g['nombre_' + g.pagado_por] if 'nombre_' + g.pagado_por in g else (cfg.nombre_persona1 if g.pagado_por == 'persona1' else cfg.nombre_persona2) }}</td>
+        <td>${{ "%.2f"|format(g.monto_total) }}</td>
+        <td>${{ "%.2f"|format(g.monto_total / g.meses_diferidos) }}</td>
+        <td>{{ g.mes_inicio.strftime('%b %Y') }}</td>
+        <td>{{ g.meses_diferidos }}</td>
+        <td class="text-muted">{{ g.fecha_registro.strftime('%d/%m/%Y') }}</td>
+        <td class="actions">
+          <a href="{{ url_for('gastos.editar', gasto_id=g.id) }}" class="btn-sm btn-edit">Editar</a>
+          <form method="POST" action="{{ url_for('gastos.eliminar', gasto_id=g.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este gasto?')">
+            <button type="submit" class="btn-sm btn-delete">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No hay gastos registrados aún.</p>
+  <a href="{{ url_for('gastos.nuevo') }}" class="btn btn-primary">Agregar el primero</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Descargas{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Descargar información</h2>
+</div>
+
+<p class="text-muted" style="margin-bottom:1.5rem">
+  Selecciona un mes para descargar un archivo Excel con el resumen de gastos, balance y pagos extra.
+</p>
+
+<div class="form-card" style="max-width:480px">
+  <form method="GET" action="{{ url_for('descargas.excel') }}">
+    <div class="form-group">
+      <label for="mes-sel">Mes</label>
+      <select name="" id="mes-sel" onchange="actualizarParams(this)">
+        {% for m in meses %}
+        <option value="{{ m.year }}-{{ '%02d'|format(m.month) }}"
+          {% if m.year == year_sel and m.month == month_sel %}selected{% endif %}>
+          {{ m.label }}
+        </option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="year"  id="inp-year"  value="{{ year_sel }}">
+      <input type="hidden" name="month" id="inp-month" value="{{ month_sel }}">
+    </div>
+
+    <div class="download-preview">
+      <div class="download-icon">📊</div>
+      <div>
+        <div class="download-title">Excel (.xlsx)</div>
+        <div class="download-desc">3 hojas: Resumen, Gastos del mes y Pagos Extra</div>
+      </div>
+    </div>
+
+    <div class="form-actions" style="margin-top:1.25rem">
+      <button type="submit" class="btn btn-primary">⬇️ Descargar Excel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+<style>
+.download-preview {
+  display: flex; align-items: center; gap: 1rem;
+  background: #f0faf4; border: 1px solid #b7e4c7;
+  border-radius: 8px; padding: 1rem 1.25rem; margin-top: .5rem;
+}
+.download-icon { font-size: 2rem; line-height: 1; }
+.download-title { font-weight: 700; font-size: .95rem; }
+.download-desc  { font-size: .82rem; color: #6b6860; margin-top: 2px; }
+</style>
+
+<script>
+function actualizarParams(sel) {
+  const [y, m] = sel.value.split('-');
+  document.getElementById('inp-year').value  = y;
+  document.getElementById('inp-month').value = parseInt(m);
+}
+</script>

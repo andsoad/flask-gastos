@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% block title %}Reporte — {{ mes_label }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Reporte: {{ mes_label }}</h2>
+  <div class="mes-selector">
+    <select id="mes-select" onchange="irAMes(this.value)">
+      {% for m in meses_disponibles %}
+      <option value="{{ m.year }}-{{ '%02d'|format(m.month) }}"
+        {% if m.year == year and m.month == month %}selected{% endif %}>
+        {{ m.label }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+{# Balance del mes #}
+<h3 class="section-title">Balance del mes</h3>
+<div class="cards-grid">
+  <div class="card card-stat">
+    <div class="stat-label">Total gastado</div>
+    <div class="stat-value">${{ "%.2f"|format(balance_mes.total_gastado) }}</div>
+  </div>
+  <div class="card card-stat">
+    <div class="stat-label">Corresponde a cada quien</div>
+    <div class="stat-value">${{ "%.2f"|format(balance_mes.mitad_total) }}</div>
+  </div>
+  <div class="card card-stat">
+    <div class="stat-label">{{ cfg.nombre_persona1 }} pagó</div>
+    <div class="stat-value">${{ "%.2f"|format(balance_mes.total_p1) }}</div>
+    <div class="stat-sub {% if balance_mes.balance_p1 > 0 %}positive{% elif balance_mes.balance_p1 < 0 %}negative{% endif %}">
+      {% if balance_mes.balance_p1 > 0 %}Pagó ${{ "%.2f"|format(balance_mes.balance_p1) }} de más
+      {% elif balance_mes.balance_p1 < 0 %}Debe ${{ "%.2f"|format(balance_mes.balance_p1|abs) }}
+      {% else %}Balanceado ✓{% endif %}
+    </div>
+  </div>
+  <div class="card card-stat">
+    <div class="stat-label">{{ cfg.nombre_persona2 }} pagó</div>
+    <div class="stat-value">${{ "%.2f"|format(balance_mes.total_p2) }}</div>
+    <div class="stat-sub {% if balance_mes.balance_p2 > 0 %}positive{% elif balance_mes.balance_p2 < 0 %}negative{% endif %}">
+      {% if balance_mes.balance_p2 > 0 %}Pagó ${{ "%.2f"|format(balance_mes.balance_p2) }} de más
+      {% elif balance_mes.balance_p2 < 0 %}Debe ${{ "%.2f"|format(balance_mes.balance_p2|abs) }}
+      {% else %}Balanceado ✓{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if balance_mes.deuda %}
+<div class="deuda-banner">
+  💸 <strong>{{ cfg['nombre_' + balance_mes.deuda.deudor] }} le debe ${{ "%.2f"|format(balance_mes.deuda.monto) }} a {{ cfg['nombre_' + balance_mes.deuda.acreedor] }}</strong> este mes
+</div>
+{% endif %}
+
+{# Gastos del mes #}
+{% if balance_mes.gastos %}
+<h3 class="section-title" style="margin-top:2rem">Gastos aplicados a este mes</h3>
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr><th>Descripción</th><th>Categoría</th><th>Pagó</th><th>Monto total</th><th>Cuota mes</th><th>Por persona</th><th>Meses</th></tr>
+    </thead>
+    <tbody>
+      {% for g in balance_mes.gastos %}
+      <tr>
+        <td>{{ g.descripcion }}</td>
+        <td><span class="badge badge-cat">{{ g.categoria }}</span></td>
+        <td>{{ cfg['nombre_' + g.pagado_por] }}</td>
+        <td>${{ "%.2f"|format(g.monto_total) }}</td>
+        <td>${{ "%.2f"|format(g.cuota_mes) }}</td>
+        <td>${{ "%.2f"|format(g.mitad) }}</td>
+        <td>{{ g.meses_diferidos }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# Pagos extra del mes #}
+{% if balance_mes.pagos_extra %}
+<h3 class="section-title" style="margin-top:2rem">Pagos extra del mes</h3>
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr><th>Descripción</th><th>Pagó</th><th>Recibió</th><th>Monto</th><th>Notas</th></tr>
+    </thead>
+    <tbody>
+      {% for p in balance_mes.pagos_extra %}
+      <tr>
+        <td>{{ p.descripcion }}</td>
+        <td>{{ cfg['nombre_' + p.pagado_por] }}</td>
+        <td>{{ cfg['nombre_' + p.recibido_por] }}</td>
+        <td>${{ "%.2f"|format(p.monto) }}</td>
+        <td class="text-muted">{{ p.notas or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# Acumulado #}
+<h3 class="section-title" style="margin-top:2.5rem">Acumulado (desde dic 2024 hasta {{ mes_label }})</h3>
+<div class="cards-grid">
+  <div class="card card-stat">
+    <div class="stat-label">Total acumulado</div>
+    <div class="stat-value">${{ "%.2f"|format(acumulado.acum_total) }}</div>
+  </div>
+  <div class="card card-stat">
+    <div class="stat-label">{{ cfg.nombre_persona1 }}</div>
+    <div class="stat-value">${{ "%.2f"|format(acumulado.acum_p1) }}</div>
+    <div class="stat-sub {% if acumulado.bal_acum_p1 > 0 %}positive{% elif acumulado.bal_acum_p1 < 0 %}negative{% endif %}">
+      {% if acumulado.bal_acum_p1 > 0 %}+${{ "%.2f"|format(acumulado.bal_acum_p1) }}
+      {% elif acumulado.bal_acum_p1 < 0 %}-${{ "%.2f"|format(acumulado.bal_acum_p1|abs) }}
+      {% else %}Balanceado ✓{% endif %}
+    </div>
+  </div>
+  <div class="card card-stat">
+    <div class="stat-label">{{ cfg.nombre_persona2 }}</div>
+    <div class="stat-value">${{ "%.2f"|format(acumulado.acum_p2) }}</div>
+    <div class="stat-sub {% if acumulado.bal_acum_p2 > 0 %}positive{% elif acumulado.bal_acum_p2 < 0 %}negative{% endif %}">
+      {% if acumulado.bal_acum_p2 > 0 %}+${{ "%.2f"|format(acumulado.bal_acum_p2) }}
+      {% elif acumulado.bal_acum_p2 < 0 %}-${{ "%.2f"|format(acumulado.bal_acum_p2|abs) }}
+      {% else %}Balanceado ✓{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if acumulado.deuda_acum %}
+<div class="deuda-banner deuda-acum">
+  📊 Acumulado: <strong>{{ cfg['nombre_' + acumulado.deuda_acum.deudor] }} debe ${{ "%.2f"|format(acumulado.deuda_acum.monto) }} a {{ cfg['nombre_' + acumulado.deuda_acum.acreedor] }}</strong> en total
+</div>
+{% endif %}
+
+{# Histórico por mes #}
+<h3 class="section-title" style="margin-top:2rem">Histórico mensual</h3>
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr><th>Mes</th><th>{{ cfg.nombre_persona1 }}</th><th>{{ cfg.nombre_persona2 }}</th><th>Total</th><th>Balance {{ cfg.nombre_persona1 }}</th><th>Balance {{ cfg.nombre_persona2 }}</th></tr>
+    </thead>
+    <tbody>
+      {% for m in acumulado.meses %}
+      <tr {% if m.year == year and m.month == month %}class="row-highlight"{% endif %}>
+        <td>{{ m.label }}</td>
+        <td>${{ "%.2f"|format(m.total_p1) }}</td>
+        <td>${{ "%.2f"|format(m.total_p2) }}</td>
+        <td>${{ "%.2f"|format(m.total) }}</td>
+        <td class="{% if m.balance_p1 > 0 %}positive{% elif m.balance_p1 < 0 %}negative{% endif %}">
+          {% if m.balance_p1 > 0 %}+{% endif %} ${{ "%.2f"|format(m.balance_p1) }}
+        </td>
+        <td class="{% if m.balance_p2 > 0 %}positive{% elif m.balance_p2 < 0 %}negative{% endif %}">
+          {% if m.balance_p2 > 0 %}+{% endif %} ${{ "%.2f"|format(m.balance_p2) }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function irAMes(val) {
+  const [y, m] = val.split('-');
+  window.location.href = '/reporte?year=' + y + '&month=' + parseInt(m);
+}
+</script>
+{% endblock %}
