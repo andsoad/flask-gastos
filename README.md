@@ -1,127 +1,110 @@
-# Gastos Pareja 💑
+# Gastos Pareja 💑 — Cloudflare Workers + D1
 
-Aplicación Flask + MySQL para llevar el control de gastos compartidos entre dos personas.
+Esta rama usa **FastAPI + Cloudflare D1 (SQLite)** en lugar de Flask + MySQL.
+Los templates HTML y la lógica de negocio son idénticos a la rama `main`.
 
-## Características
+## Diferencias vs rama `main`
 
-- ✅ Gastos divididos al 50% entre dos personas
-- ✅ Soporte para gastos diferidos a varios meses (sin interés)
-- ✅ Pagos extra / transferencias directas
-- ✅ Reporte mensual y acumulado (desde dic 2024)
-- ✅ Categorías: Súper, Restaurantes, Transporte, Servicios, Entretenimiento, Salud, Viajes, Ropa, Otros
-- ✅ Sistema de usuarios con roles admin / usuario
-- ✅ Compatible con InMotion Hosting (Passenger WSGI)
+| | `main` (InMotion) | `cloudflare` (esta rama) |
+|---|---|---|
+| Framework | Flask | FastAPI |
+| Base de datos | MySQL | Cloudflare D1 (SQLite) |
+| Auth | Flask-Login (sesiones) | JWT (cookie httponly) |
+| Deploy | passenger_wsgi.py | wrangler deploy |
+| Primer admin | `python crear_admin.py` | `/setup/crear-admin` en el navegador |
 
 ---
 
-## Instalación en InMotion Hosting
+## Requisitos
 
-### 1. Subir archivos
-
-Sube todos los archivos al directorio de tu dominio via FTP o el Administrador de Archivos de cPanel.
-
-### 2. Crear la base de datos MySQL
-
-En cPanel > MySQL Databases:
-1. Crea una base de datos (ej. `usuario_gastos`)
-2. Crea un usuario MySQL y asígnalo a la base de datos con todos los permisos
-3. En phpMyAdmin, importa el archivo `schema.sql`
-
-### 3. Configurar el archivo `.env`
-
-Edita el archivo `.env` con tus credenciales:
-
-```
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=usuario_mysql
-MYSQL_PASSWORD=tu_password
-MYSQL_DB=usuario_gastos
-SECRET_KEY=una_clave_secreta_larga_y_aleatoria
-```
-
-### 4. Crear el entorno virtual e instalar dependencias
-
-Conéctate via SSH:
+- Node.js 18+ (para Wrangler CLI)
+- Cuenta en Cloudflare (gratis)
 
 ```bash
-cd ~/public_html/tu-directorio
-python3.11 -m venv venv
-source venv/bin/activate
+npm install -g wrangler
+wrangler login
+```
+
+---
+
+## Instalación
+
+### 1. Crear la base de datos D1
+
+```bash
+wrangler d1 create gastos_pareja
+```
+
+Copia el `database_id` que te devuelve y pégalo en `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "gastos_pareja"
+database_id = "TU_DATABASE_ID_AQUI"
+```
+
+### 2. Crear las tablas
+
+```bash
+wrangler d1 execute gastos_pareja --file=schema_d1.sql
+```
+
+### 3. Configurar variables de entorno
+
+En `wrangler.toml` actualiza:
+
+```toml
+[vars]
+SECRET_KEY = "una_clave_secreta_larga_y_aleatoria"
+```
+
+### 4. Instalar dependencias Python
+
+```bash
 pip install -r requirements.txt
 ```
 
-> **Nota:** Ajusta la ruta del intérprete en `passenger_wsgi.py` si usas una versión distinta de Python.
-
-### 5. Configurar Python App en cPanel
-
-En cPanel > Setup Python App:
-- Python version: 3.11 (o la disponible)
-- Application root: directorio de tu app
-- Application URL: tu dominio o subdominio
-- Application startup file: `passenger_wsgi.py`
-- Application Entry point: `application`
-
-### 6. Crear el primer usuario admin
+### 5. Probar en local
 
 ```bash
-source venv/bin/activate
-python crear_admin.py
+wrangler dev
 ```
 
-Sigue las instrucciones para crear tu cuenta de administrador.
+### 6. Crear el primer admin
+
+Abre en tu navegador: `http://localhost:8787/setup/crear-admin`
+
+Esta ruta se deshabilita automáticamente después de crear el primer usuario.
+
+### 7. Deploy a producción
+
+```bash
+wrangler deploy
+```
+
+Tu app quedará en: `https://gastos-pareja.TU_USUARIO.workers.dev`
 
 ---
 
-## Uso
-
-### Gastos diferidos
-
-Un gasto de $3,000 diferido a 3 meses se registra **una sola vez** con `meses_diferidos = 3`.
-La app automáticamente aplica **$1,000** a cada uno de los 3 meses consecutivos,
-y divide esa cuota en **$500 por persona**.
-
-### Pagos extra
-
-Son transferencias directas entre las dos personas (sin asociarse a un gasto específico).
-Se registran con el mes al que pertenecen y aparecen en el reporte mensual afectando el balance.
-
-### Reporte
-
-El reporte muestra:
-- **Balance del mes seleccionado**: cuánto pagó cada quien, cuánto le toca, y quién debe qué
-- **Acumulado desde dic 2024**: balance histórico total
-- **Histórico mensual**: tabla con el desglose mes por mes
-
----
-
-## Estructura del proyecto
+## Estructura
 
 ```
 gastos_pareja/
-├── app.py               # App principal Flask
-├── extensions.py        # Extensiones (MySQL, LoginManager)
-├── models.py            # Modelo de Usuario
-├── passenger_wsgi.py    # Entrada WSGI para InMotion
-├── crear_admin.py       # Script para crear el primer admin
+├── wrangler.toml
+├── schema_d1.sql
 ├── requirements.txt
-├── schema.sql           # Esquema de la base de datos
-├── .env                 # Credenciales (NO subir a git)
-├── routes/
-│   ├── auth.py
-│   ├── gastos.py
-│   ├── pagos_extra.py
-│   ├── reportes.py
-│   └── admin.py
-├── templates/
-│   ├── base.html
-│   ├── login.html
-│   ├── dashboard.html
-│   ├── reporte.html
-│   ├── gastos/
-│   ├── pagos_extra/
-│   └── admin/
-└── static/
-    ├── css/style.css
-    └── js/main.js
+├── src/
+│   ├── index.py        # FastAPI (todas las rutas)
+│   ├── auth_utils.py   # JWT + passwords
+│   ├── db.py           # Helper D1
+│   └── balance.py      # Lógica de balances
+├── templates/          # Jinja2 (igual que rama main)
+└── static/             # CSS y JS (igual que rama main)
 ```
+
+## Plan gratuito de Cloudflare
+- 100,000 requests/día en Workers
+- 5 GB en D1
+- HTTPS automático
+- Dominio `.workers.dev` incluido

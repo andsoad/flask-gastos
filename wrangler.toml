@@ -1,0 +1,17 @@
+name = "gastos-pareja"
+main = "src/index.py"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["python_workers"]
+
+[vars]
+SECRET_KEY = "cambia_esto_por_una_clave_secreta"
+NOMBRE_PERSONA1 = "Ana"
+NOMBRE_PERSONA2 = "Luis"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gastos_pareja"
+database_id = "TU_DATABASE_ID_AQUI"
+
+[assets]
+directory = "./static"
