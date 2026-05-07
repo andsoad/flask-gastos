@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     monto_total     REAL    NOT NULL,
     categoria       TEXT    NOT NULL,
     pagado_por      TEXT    DEFAULT NULL CHECK (pagado_por IN ('persona1','persona2',NULL)),
-    mes_inicio      TEXT    NOT NULL COMMENT 'YYYY-MM-01',
+    mes_inicio      TEXT    NOT NULL, -- YYYY-MM-01
     meses_diferidos INTEGER NOT NULL DEFAULT 1,
     fecha_registro  TEXT    NOT NULL DEFAULT (datetime('now')),
     notas           TEXT,
