@@ -1,23 +1,22 @@
 """
 Gastos Pareja — Cloudflare Workers + FastAPI + D1
-Entry point usando WorkerEntrypoint + ASGI (patrón oficial de Cloudflare).
+Lazy loading para no exceder el límite de CPU de startup.
 """
 from workers import WorkerEntrypoint
 import asgi
 
+# Importaciones livianas al inicio
 from fastapi import FastAPI, Request, Depends, HTTPException, Form, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from typing import Optional
 from datetime import date
 import os
 
-from auth_utils import verify_password, hash_password, create_token, decode_token
-from db import db_fetch_all, db_fetch_one, db_run, get_config
-from balance import calcular_balance_mes, calcular_balance_acumulado, mes_label
-
 app = FastAPI()
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
+templates = Jinja2Templates(
+    directory=os.path.join(os.path.dirname(__file__), '..', 'templates')
+)
 
 CATEGORIAS = [
     ('super','🛒 Súper/Comida'), ('restaurantes','🍽️ Restaurantes'),
@@ -26,6 +25,20 @@ CATEGORIAS = [
     ('viajes','✈️ Viajes'), ('ropa','👗 Ropa'), ('mascotas','🐾 Mascotas'),
     ('casa','🏠 Casa'), ('bebe','👶 Bebé'), ('otros','📦 Otros'),
 ]
+
+# ── Lazy imports de módulos pesados ────────────────────────────────────────────
+
+def _auth():
+    from auth_utils import verify_password, hash_password, create_token, decode_token
+    return verify_password, hash_password, create_token, decode_token
+
+def _db():
+    from db import db_fetch_all, db_fetch_one, db_run, get_config
+    return db_fetch_all, db_fetch_one, db_run, get_config
+
+def _balance():
+    from balance import calcular_balance_mes, calcular_balance_acumulado, mes_label
+    return calcular_balance_mes, calcular_balance_acumulado, mes_label
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -38,9 +51,11 @@ def get_secret(request: Request) -> str:
 async def get_current_user(request: Request, token: Optional[str] = Cookie(None)):
     if not token:
         return None
+    _, _, _, decode_token = _auth()
     payload = decode_token(token, get_secret(request))
     if not payload:
         return None
+    _, db_fetch_one, _, _ = _db()
     return await db_fetch_one(get_db(request),
         "SELECT id, nombre, username, rol, persona, activo FROM usuarios WHERE id = ? AND activo = 1",
         [payload.get('sub')])
@@ -58,6 +73,7 @@ async def require_admin(request: Request, token: Optional[str] = Cookie(None)):
     return user
 
 def meses_disponibles():
+    _, _, mes_label = _balance()
     hoy = date.today()
     y, m = 2024, 12
     meses = []
@@ -86,10 +102,13 @@ async def login_get(request: Request):
 @app.post('/login')
 async def login_post(request: Request,
                      username: str = Form(...), password: str = Form(...)):
+    verify_password, _, create_token, _ = _auth()
+    _, db_fetch_one, _, _ = _db()
     user = await db_fetch_one(get_db(request),
         "SELECT * FROM usuarios WHERE username = ? AND activo = 1", [username.lower()])
     if not user or not verify_password(password, user['password_hash']):
-        return templates.TemplateResponse('login.html', {'request': request, 'error': 'Usuario o contraseña incorrectos'})
+        return templates.TemplateResponse('login.html',
+            {'request': request, 'error': 'Usuario o contraseña incorrectos'})
     token = create_token({'sub': user['id']}, get_secret(request))
     return set_cookie_redirect('/dashboard', token)
 
@@ -103,6 +122,8 @@ async def logout():
 
 @app.get('/dashboard', response_class=HTMLResponse)
 async def dashboard(request: Request, user=Depends(require_user)):
+    db_fetch_all, db_fetch_one, db_run, get_config = _db()
+    calcular_balance_mes, calcular_balance_acumulado, mes_label = _balance()
     hoy = date.today()
     cfg = await get_config(get_db(request))
     bal = await calcular_balance_mes(get_db(request), hoy.year, hoy.month)
@@ -117,7 +138,10 @@ async def dashboard(request: Request, user=Depends(require_user)):
 # ── Reporte ────────────────────────────────────────────────────────────────────
 
 @app.get('/reporte', response_class=HTMLResponse)
-async def reporte(request: Request, year: int = None, month: int = None, user=Depends(require_user)):
+async def reporte(request: Request, year: int = None, month: int = None,
+                  user=Depends(require_user)):
+    db_fetch_all, db_fetch_one, db_run, get_config = _db()
+    calcular_balance_mes, calcular_balance_acumulado, mes_label = _balance()
     hoy = date.today()
     year = year or hoy.year
     month = month or hoy.month
@@ -136,6 +160,7 @@ async def reporte(request: Request, year: int = None, month: int = None, user=De
 
 @app.get('/gastos', response_class=HTMLResponse)
 async def gastos_lista(request: Request, user=Depends(require_user)):
+    db_fetch_all, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     gastos = await db_fetch_all(get_db(request), """
         SELECT g.*, COALESCE(SUM(a.monto), 0) AS total_abonado
@@ -147,6 +172,7 @@ async def gastos_lista(request: Request, user=Depends(require_user)):
 
 @app.get('/gastos/nuevo', response_class=HTMLResponse)
 async def gastos_nuevo_get(request: Request, user=Depends(require_user)):
+    _, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     return templates.TemplateResponse('gastos/form.html', {
         'request': request, 'user': user, 'cfg': cfg,
@@ -157,6 +183,7 @@ async def gastos_nuevo_post(request: Request, user=Depends(require_user),
     descripcion: str = Form(...), monto_total: float = Form(...),
     categoria: str = Form(...), pagado_por: str = Form(''),
     mes_inicio: str = Form(...), meses_diferidos: int = Form(1), notas: str = Form('')):
+    _, _, db_run, _ = _db()
     pagador = pagado_por if pagado_por in ('persona1','persona2') else None
     result = await db_run(get_db(request), """
         INSERT INTO gastos (descripcion, monto_total, categoria, pagado_por,
@@ -168,6 +195,7 @@ async def gastos_nuevo_post(request: Request, user=Depends(require_user),
 
 @app.get('/gastos/{gasto_id}', response_class=HTMLResponse)
 async def gastos_detalle(request: Request, gasto_id: int, user=Depends(require_user)):
+    db_fetch_all, db_fetch_one, _, get_config = _db()
     cfg = await get_config(get_db(request))
     gasto = await db_fetch_one(get_db(request), "SELECT * FROM gastos WHERE id = ?", [gasto_id])
     if not gasto: return RedirectResponse('/gastos', status_code=302)
@@ -182,6 +210,7 @@ async def gastos_detalle(request: Request, gasto_id: int, user=Depends(require_u
 
 @app.get('/gastos/{gasto_id}/editar', response_class=HTMLResponse)
 async def gastos_editar_get(request: Request, gasto_id: int, user=Depends(require_user)):
+    _, db_fetch_one, _, get_config = _db()
     cfg = await get_config(get_db(request))
     gasto = await db_fetch_one(get_db(request), "SELECT * FROM gastos WHERE id = ?", [gasto_id])
     if not gasto: return RedirectResponse('/gastos', status_code=302)
@@ -195,6 +224,7 @@ async def gastos_editar_post(request: Request, gasto_id: int, user=Depends(requi
     descripcion: str = Form(...), monto_total: float = Form(...),
     categoria: str = Form(...), pagado_por: str = Form(''),
     mes_inicio: str = Form(...), meses_diferidos: int = Form(1), notas: str = Form('')):
+    _, _, db_run, _ = _db()
     pagador = pagado_por if pagado_por in ('persona1','persona2') else None
     await db_run(get_db(request), """
         UPDATE gastos SET descripcion=?, monto_total=?, categoria=?, pagado_por=?,
@@ -205,19 +235,23 @@ async def gastos_editar_post(request: Request, gasto_id: int, user=Depends(requi
 
 @app.post('/gastos/{gasto_id}/eliminar')
 async def gastos_eliminar(request: Request, gasto_id: int, user=Depends(require_user)):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request), "DELETE FROM gastos WHERE id = ?", [gasto_id])
     return RedirectResponse('/gastos', status_code=302)
 
 @app.post('/gastos/{gasto_id}/abonos/nuevo')
 async def abono_nuevo(request: Request, gasto_id: int, user=Depends(require_user),
     persona: str = Form(...), monto: float = Form(...), notas: str = Form('')):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request),
         "INSERT INTO abonos_gasto (gasto_id, persona, monto, notas, creado_por) VALUES (?, ?, ?, ?, ?)",
         [gasto_id, persona, monto, notas, user['id']])
     return RedirectResponse(f'/gastos/{gasto_id}', status_code=302)
 
 @app.post('/gastos/{gasto_id}/abonos/{abono_id}/eliminar')
-async def abono_eliminar(request: Request, gasto_id: int, abono_id: int, user=Depends(require_user)):
+async def abono_eliminar(request: Request, gasto_id: int, abono_id: int,
+                         user=Depends(require_user)):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request),
         "DELETE FROM abonos_gasto WHERE id = ? AND gasto_id = ?", [abono_id, gasto_id])
     return RedirectResponse(f'/gastos/{gasto_id}', status_code=302)
@@ -226,6 +260,7 @@ async def abono_eliminar(request: Request, gasto_id: int, abono_id: int, user=De
 
 @app.get('/pagos-extra', response_class=HTMLResponse)
 async def pe_lista(request: Request, user=Depends(require_user)):
+    db_fetch_all, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     pagos = await db_fetch_all(get_db(request),
         "SELECT * FROM pagos_extra ORDER BY mes DESC, fecha_registro DESC")
@@ -234,6 +269,7 @@ async def pe_lista(request: Request, user=Depends(require_user)):
 
 @app.get('/pagos-extra/nuevo', response_class=HTMLResponse)
 async def pe_nuevo_get(request: Request, user=Depends(require_user)):
+    _, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     return templates.TemplateResponse('pagos_extra/form.html', {
         'request': request, 'user': user, 'cfg': cfg, 'pago': None, 'editando': False})
@@ -243,6 +279,7 @@ async def pe_nuevo_post(request: Request, user=Depends(require_user),
     descripcion: str = Form(...), monto: float = Form(...),
     pagado_por: str = Form(...), recibido_por: str = Form(...),
     mes: str = Form(...), notas: str = Form('')):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request),
         "INSERT INTO pagos_extra (descripcion, monto, pagado_por, recibido_por, mes, notas, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [descripcion, monto, pagado_por, recibido_por, mes + '-01', notas, user['id']])
@@ -250,6 +287,7 @@ async def pe_nuevo_post(request: Request, user=Depends(require_user),
 
 @app.get('/pagos-extra/{pago_id}/editar', response_class=HTMLResponse)
 async def pe_editar_get(request: Request, pago_id: int, user=Depends(require_user)):
+    _, db_fetch_one, _, get_config = _db()
     cfg = await get_config(get_db(request))
     pago = await db_fetch_one(get_db(request), "SELECT * FROM pagos_extra WHERE id = ?", [pago_id])
     if not pago: return RedirectResponse('/pagos-extra', status_code=302)
@@ -262,6 +300,7 @@ async def pe_editar_post(request: Request, pago_id: int, user=Depends(require_us
     descripcion: str = Form(...), monto: float = Form(...),
     pagado_por: str = Form(...), recibido_por: str = Form(...),
     mes: str = Form(...), notas: str = Form('')):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request),
         "UPDATE pagos_extra SET descripcion=?, monto=?, pagado_por=?, recibido_por=?, mes=?, notas=? WHERE id=?",
         [descripcion, monto, pagado_por, recibido_por, mes + '-01', notas, pago_id])
@@ -269,6 +308,7 @@ async def pe_editar_post(request: Request, pago_id: int, user=Depends(require_us
 
 @app.post('/pagos-extra/{pago_id}/eliminar')
 async def pe_eliminar(request: Request, pago_id: int, user=Depends(require_user)):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request), "DELETE FROM pagos_extra WHERE id = ?", [pago_id])
     return RedirectResponse('/pagos-extra', status_code=302)
 
@@ -276,6 +316,7 @@ async def pe_eliminar(request: Request, pago_id: int, user=Depends(require_user)
 
 @app.get('/descargas', response_class=HTMLResponse)
 async def descargas(request: Request, user=Depends(require_user)):
+    _, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     hoy = date.today()
     return templates.TemplateResponse('descargas/index.html', {
@@ -286,6 +327,7 @@ async def descargas(request: Request, user=Depends(require_user)):
 
 @app.get('/admin/usuarios', response_class=HTMLResponse)
 async def admin_usuarios(request: Request, user=Depends(require_admin)):
+    db_fetch_all, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     lista = await db_fetch_all(get_db(request),
         "SELECT id, nombre, username, rol, persona, activo, fecha_creacion FROM usuarios ORDER BY fecha_creacion")
@@ -294,6 +336,7 @@ async def admin_usuarios(request: Request, user=Depends(require_admin)):
 
 @app.get('/admin/usuarios/nuevo', response_class=HTMLResponse)
 async def admin_nuevo_get(request: Request, user=Depends(require_admin)):
+    _, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     return templates.TemplateResponse('admin/form_usuario.html', {
         'request': request, 'user': user, 'cfg': cfg, 'usuario': None, 'editando': False})
@@ -302,6 +345,8 @@ async def admin_nuevo_get(request: Request, user=Depends(require_admin)):
 async def admin_nuevo_post(request: Request, user=Depends(require_admin),
     nombre: str = Form(...), username: str = Form(...), password: str = Form(...),
     rol: str = Form('usuario'), persona: str = Form('')):
+    _, hash_password, _, _ = _auth()
+    _, _, db_run, get_config = _db()
     persona_val = persona if persona in ('persona1','persona2') else None
     try:
         await db_run(get_db(request),
@@ -316,6 +361,7 @@ async def admin_nuevo_post(request: Request, user=Depends(require_admin),
 
 @app.get('/admin/usuarios/{uid}/editar', response_class=HTMLResponse)
 async def admin_editar_get(request: Request, uid: int, user=Depends(require_admin)):
+    _, db_fetch_one, _, get_config = _db()
     cfg = await get_config(get_db(request))
     usuario = await db_fetch_one(get_db(request),
         "SELECT id, nombre, username, rol, persona, activo FROM usuarios WHERE id = ?", [uid])
@@ -327,6 +373,8 @@ async def admin_editar_get(request: Request, uid: int, user=Depends(require_admi
 async def admin_editar_post(request: Request, uid: int, user=Depends(require_admin),
     nombre: str = Form(...), username: str = Form(...), password: str = Form(''),
     rol: str = Form('usuario'), persona: str = Form(''), activo: str = Form('')):
+    _, hash_password, _, _ = _auth()
+    _, _, db_run, _ = _db()
     persona_val = persona if persona in ('persona1','persona2') else None
     activo_val = 1 if activo else 0
     if password:
@@ -341,12 +389,14 @@ async def admin_editar_post(request: Request, uid: int, user=Depends(require_adm
 
 @app.post('/admin/usuarios/{uid}/eliminar')
 async def admin_eliminar(request: Request, uid: int, user=Depends(require_admin)):
+    _, _, db_run, _ = _db()
     if uid != user['id']:
         await db_run(get_db(request), "DELETE FROM usuarios WHERE id = ?", [uid])
     return RedirectResponse('/admin/usuarios', status_code=302)
 
 @app.get('/admin/configuracion', response_class=HTMLResponse)
 async def admin_config_get(request: Request, user=Depends(require_admin)):
+    _, _, _, get_config = _db()
     cfg = await get_config(get_db(request))
     return templates.TemplateResponse('admin/configuracion.html', {
         'request': request, 'user': user, 'cfg': cfg})
@@ -354,6 +404,7 @@ async def admin_config_get(request: Request, user=Depends(require_admin)):
 @app.post('/admin/configuracion')
 async def admin_config_post(request: Request, user=Depends(require_admin),
     nombre_persona1: str = Form(...), nombre_persona2: str = Form(...)):
+    _, _, db_run, _ = _db()
     await db_run(get_db(request),
         "UPDATE configuracion SET nombre_persona1=?, nombre_persona2=? WHERE id=1",
         [nombre_persona1, nombre_persona2])
@@ -363,6 +414,7 @@ async def admin_config_post(request: Request, user=Depends(require_admin),
 
 @app.get('/setup/crear-admin', response_class=HTMLResponse)
 async def setup_get(request: Request):
+    _, db_fetch_one, _, _ = _db()
     count = await db_fetch_one(get_db(request), "SELECT COUNT(*) as n FROM usuarios")
     if count and count['n'] > 0:
         return RedirectResponse('/login', status_code=302)
@@ -371,6 +423,8 @@ async def setup_get(request: Request):
 @app.post('/setup/crear-admin')
 async def setup_post(request: Request,
     nombre: str = Form(...), username: str = Form(...), password: str = Form(...)):
+    _, hash_password, _, _ = _auth()
+    _, db_fetch_one, db_run, _ = _db()
     count = await db_fetch_one(get_db(request), "SELECT COUNT(*) as n FROM usuarios")
     if count and count['n'] > 0:
         return RedirectResponse('/login', status_code=302)
