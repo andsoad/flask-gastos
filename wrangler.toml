@@ -1,4 +1,4 @@
-name = "gastos-pareja"
+name = "gastos"
 main = "src/index.py"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["python_workers"]
@@ -11,7 +11,7 @@ NOMBRE_PERSONA2 = "Zen"
 [[d1_databases]]
 binding = "DB"
 database_name = "gastos_pareja"
-database_id = "826a0fb0-731a-4c33-b28c-8a0ea932b4e9"
+database_id = "0468b4ef-5aca-4df2-9fd2-b2f0cb633695"
 
 [assets]
 directory = "./static"
