@@ -1,0 +1,6 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/$USER/public_html/gastos
+    - /bin/cp -R . $DEPLOYPATH
+    - cd $DEPLOYPATH && pip install -r requirements.txt --user --quiet
