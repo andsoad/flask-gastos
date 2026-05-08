@@ -11,13 +11,13 @@ _env = None
 def get_env() -> Environment:
     global _env
     if _env is None:
-        _env = Environment(
-            loader=select_autoescape(['html']),
-            autoescape=True,
-        )
-        # Carga templates desde el directorio templates/
+        # En Cloudflare Workers el root es src/, templates está un nivel arriba
+        import os
         template_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
-        _env.loader = FileSystemLoader(template_dir)
+        _env = Environment(
+            loader=FileSystemLoader(template_dir),
+            autoescape=select_autoescape(['html']),
+        )
     return _env
 
 

@@ -3,7 +3,7 @@ Lógica de cálculo de balance mensual y acumulado.
 Solo usa stdlib de Python.
 """
 from datetime import date
-from src.db import db_fetch_all, get_config
+from db import db_fetch_all, get_config
 
 
 def primer_dia_mes(year: int, month: int) -> str:

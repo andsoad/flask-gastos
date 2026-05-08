@@ -8,11 +8,11 @@ import json
 
 from js import Response as JSResponse, Headers
 
-from src.router import Router, Response, redirect
-from src.auth_utils import hash_password, verify_password, create_token, decode_token
-from src.db import db_fetch_all, db_fetch_one, db_run, get_config
-from src.balance import calcular_balance_mes, calcular_balance_acumulado, mes_label
-from src.templating import render
+from router import Router, Response, redirect
+from auth_utils import hash_password, verify_password, create_token, decode_token
+from db import db_fetch_all, db_fetch_one, db_run, get_config
+from balance import calcular_balance_mes, calcular_balance_acumulado, mes_label
+from templating import render
 
 router = Router()
 
