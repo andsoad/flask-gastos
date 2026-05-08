@@ -1,19 +1,20 @@
 """
-Gastos Pareja — FastAPI para Cloudflare Workers + D1
+Gastos Pareja — Cloudflare Workers + D1
+Entry point para Pyodide runtime (Python puro, sin dependencias externas).
 """
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from typing import Optional
-from datetime import date
+from urllib.parse import urlparse, parse_qs, unquote_plus
+from datetime import date as Date
 import json
 
-from src.auth_utils import verify_password, hash_password, create_access_token, decode_token
-from src.db import db_fetch_all, db_fetch_one, db_run, get_config
-from src.balance import calcular_balance_mes, calcular_balance_acumulado, primer_dia_mes
+from js import Response as JSResponse, Headers
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+from src.router import Router, Response, redirect
+from src.auth_utils import hash_password, verify_password, create_token, decode_token
+from src.db import db_fetch_all, db_fetch_one, db_run, get_config
+from src.balance import calcular_balance_mes, calcular_balance_acumulado, mes_label
+from src.templating import render
+
+router = Router()
 
 CATEGORIAS = [
     ('super',          '🛒 Súper/Comida'),
@@ -31,472 +32,499 @@ CATEGORIAS = [
 ]
 
 
-# ── Auth helpers ───────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
-def get_db(request: Request):
-    return request.scope['env'].DB
+def get_token_from_request(request) -> str | None:
+    cookie_header = request.headers.get('Cookie') or ''
+    for part in cookie_header.split(';'):
+        part = part.strip()
+        if part.startswith('token='):
+            return part[6:]
+    return None
 
 
-def get_secret(request: Request) -> str:
-    return request.scope['env'].SECRET_KEY
-
-
-async def get_current_user(request: Request, token: Optional[str] = Cookie(None)):
-    db     = get_db(request)
-    secret = get_secret(request)
+async def get_current_user(request, env) -> dict | None:
+    token = get_token_from_request(request)
     if not token:
         return None
-    payload = decode_token(token, secret)
+    payload = decode_token(token, env.SECRET_KEY)
     if not payload:
         return None
-    user = await db_fetch_one(db,
-        "SELECT id, nombre, username, rol, persona, activo FROM usuarios WHERE id = ?",
-        [payload.get('sub')]
-    )
-    if not user or not user['activo']:
-        return None
-    return user
+    return await db_fetch_one(env.DB,
+        "SELECT id, nombre, username, rol, persona, activo FROM usuarios WHERE id = ? AND activo = 1",
+        [payload.get('sub')])
 
 
-async def require_user(request: Request, token: Optional[str] = Cookie(None)):
-    user = await get_current_user(request, token)
+async def require_user(request, env):
+    user = await get_current_user(request, env)
     if not user:
-        raise HTTPException(status_code=303, headers={"Location": "/login"})
-    return user
+        return None, redirect('/login')
+    return user, None
 
 
-async def require_admin(request: Request, token: Optional[str] = Cookie(None)):
-    user = await require_user(request, token)
+async def require_admin(request, env):
+    user, err = await require_user(request, env)
+    if err:
+        return None, err
     if user['rol'] != 'admin':
-        raise HTTPException(status_code=403, detail="Se requieren permisos de administrador")
-    return user
+        return None, Response('Forbidden', status=403)
+    return user, None
+
+
+async def parse_form(request) -> dict:
+    body = await request.text()
+    result = {}
+    for part in body.split('&'):
+        if '=' in part:
+            k, v = part.split('=', 1)
+            result[unquote_plus(k)] = unquote_plus(v)
+    return result
+
+
+def get_qs(request) -> dict:
+    qs = urlparse(request.url).query
+    params = parse_qs(qs)
+    return {k: v[0] for k, v in params.items()}
 
 
 def meses_disponibles():
-    inicio = date(2024, 12, 1)
-    hoy    = date.today().replace(day=1)
-    meses  = []
-    y, m   = inicio.year, inicio.month
-    while date(y, m, 1) <= hoy:
-        meses.append({'year': y, 'month': m, 'label': date(y, m, 1).strftime('%B %Y')})
-        if m == 12:
+    hoy  = Date.today()
+    y, m = 2024, 12
+    meses = []
+    while (y, m) <= (hoy.year, hoy.month):
+        meses.append({'year': y, 'month': m, 'label': mes_label(y, m)})
+        m += 1
+        if m > 12:
             y, m = y + 1, 1
-        else:
-            m += 1
     return meses
 
 
-# ── Auth routes ────────────────────────────────────────────────────────────────
+def html(content: str, status: int = 200) -> Response:
+    return Response(content, status=status)
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, token: Optional[str] = Cookie(None)):
-    user = await get_current_user(request, token)
+
+def set_token_cookie(response: Response, token: str) -> Response:
+    response.extra_headers['Set-Cookie'] = f'token={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800'
+    return response
+
+
+def clear_token_cookie(response: Response) -> Response:
+    response.extra_headers['Set-Cookie'] = 'token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'
+    return response
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+@router.get('/')
+async def index(request, env):
+    user = await get_current_user(request, env)
     if user:
-        return RedirectResponse("/dashboard", status_code=302)
-    return RedirectResponse("/login", status_code=302)
+        return redirect('/dashboard')
+    return redirect('/login')
 
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_get(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+@router.get('/login')
+async def login_get(request, env):
+    return html(render('login.html', error=None))
 
 
-@app.post("/login")
-async def login_post(request: Request,
-                     username: str = Form(...),
-                     password: str = Form(...)):
-    db     = get_db(request)
-    secret = get_secret(request)
-    user   = await db_fetch_one(db,
-        "SELECT * FROM usuarios WHERE username = ? AND activo = 1", [username.lower()])
+@router.post('/login')
+async def login_post(request, env):
+    form = await parse_form(request)
+    username = form.get('username', '').strip().lower()
+    password = form.get('password', '')
+    user = await db_fetch_one(env.DB,
+        "SELECT * FROM usuarios WHERE username = ? AND activo = 1", [username])
     if not user or not verify_password(password, user['password_hash']):
-        return templates.TemplateResponse("login.html", {
-            "request": request, "error": "Usuario o contraseña incorrectos"
-        })
-    token    = create_access_token({"sub": user['id']}, secret)
-    response = RedirectResponse("/dashboard", status_code=302)
-    response.set_cookie("token", token, httponly=True, samesite="lax")
-    return response
+        return html(render('login.html', error='Usuario o contraseña incorrectos'))
+    token    = create_token({'sub': user['id']}, env.SECRET_KEY)
+    response = redirect('/dashboard')
+    return set_token_cookie(response, token)
 
 
-@app.get("/logout")
-async def logout():
-    response = RedirectResponse("/login", status_code=302)
-    response.delete_cookie("token")
-    return response
+@router.get('/logout')
+async def logout(request, env):
+    return clear_token_cookie(redirect('/login'))
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    hoy = date.today()
-    cfg = await get_config(db)
-    balance_mes = await calcular_balance_mes(db, hoy.year, hoy.month)
-    acumulado   = await calcular_balance_acumulado(db, hoy.year, hoy.month)
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "balance_mes": balance_mes, "acumulado": acumulado,
-        "mes_actual": hoy.strftime('%B %Y'),
-        "year": hoy.year, "month": hoy.month,
-    })
+@router.get('/dashboard')
+async def dashboard(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    hoy = Date.today()
+    cfg = await get_config(env.DB)
+    balance_mes = await calcular_balance_mes(env.DB, hoy.year, hoy.month)
+    acumulado   = await calcular_balance_acumulado(env.DB, hoy.year, hoy.month)
+    return html(render('dashboard.html',
+        user=user, cfg=cfg, balance_mes=balance_mes, acumulado=acumulado,
+        mes_actual=mes_label(hoy.year, hoy.month),
+        year=hoy.year, month=hoy.month))
 
 
 # ── Reporte ────────────────────────────────────────────────────────────────────
 
-@app.get("/reporte", response_class=HTMLResponse)
-async def reporte(request: Request, year: int = None, month: int = None,
-                  user=Depends(require_user)):
-    db  = get_db(request)
-    hoy = date.today()
-    year  = year  or hoy.year
-    month = month or hoy.month
-    cfg         = await get_config(db)
-    balance_mes = await calcular_balance_mes(db, year, month)
-    acumulado   = await calcular_balance_acumulado(db, year, month)
-    mes_label   = date(year, month, 1).strftime('%B %Y')
-    return templates.TemplateResponse("reporte.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "balance_mes": balance_mes, "acumulado": acumulado,
-        "mes_label": mes_label, "year": year, "month": month,
-        "meses_disponibles": meses_disponibles(),
-    })
+@router.get('/reporte')
+async def reporte(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    hoy   = Date.today()
+    qs    = get_qs(request)
+    year  = int(qs.get('year',  hoy.year))
+    month = int(qs.get('month', hoy.month))
+    cfg         = await get_config(env.DB)
+    balance_mes = await calcular_balance_mes(env.DB, year, month)
+    acumulado   = await calcular_balance_acumulado(env.DB, year, month)
+    return html(render('reporte.html',
+        user=user, cfg=cfg, balance_mes=balance_mes, acumulado=acumulado,
+        mes_label=mes_label(year, month), year=year, month=month,
+        meses_disponibles=meses_disponibles()))
 
 
 # ── Gastos ─────────────────────────────────────────────────────────────────────
 
-@app.get("/gastos", response_class=HTMLResponse)
-async def gastos_lista(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    gastos = await db_fetch_all(db, """
+@router.get('/gastos')
+async def gastos_lista(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg    = await get_config(env.DB)
+    gastos = await db_fetch_all(env.DB, """
         SELECT g.*, u.nombre AS registrado_por_nombre,
                COALESCE(SUM(a.monto), 0) AS total_abonado
         FROM gastos g
         JOIN usuarios u ON g.creado_por = u.id
         LEFT JOIN abonos_gasto a ON a.gasto_id = g.id
-        GROUP BY g.id
-        ORDER BY g.mes_inicio DESC, g.fecha_registro DESC
+        GROUP BY g.id ORDER BY g.mes_inicio DESC, g.fecha_registro DESC
     """)
-    return templates.TemplateResponse("gastos/lista.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "gastos": gastos, "categorias": CATEGORIAS,
-    })
+    return html(render('gastos/lista.html', user=user, cfg=cfg,
+                       gastos=gastos, categorias=CATEGORIAS))
 
 
-@app.get("/gastos/nuevo", response_class=HTMLResponse)
-async def gastos_nuevo_get(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    return templates.TemplateResponse("gastos/form.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "categorias": CATEGORIAS, "gasto": None,
-    })
+@router.get('/gastos/nuevo')
+async def gastos_nuevo_get(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg = await get_config(env.DB)
+    return html(render('gastos/form.html', user=user, cfg=cfg,
+                       categorias=CATEGORIAS, gasto=None, editando=False))
 
 
-@app.post("/gastos/nuevo")
-async def gastos_nuevo_post(request: Request, user=Depends(require_user),
-    descripcion: str = Form(...), monto_total: float = Form(...),
-    categoria: str = Form(...), pagado_por: str = Form(""),
-    mes_inicio: str = Form(...), meses_diferidos: int = Form(1),
-    notas: str = Form("")):
-    db = get_db(request)
-    pagador = pagado_por if pagado_por in ('persona1','persona2') else None
-    mes     = mes_inicio + "-01"
-    result  = await db_run(db, """
+@router.post('/gastos/nuevo')
+async def gastos_nuevo_post(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    form            = await parse_form(request)
+    descripcion     = form.get('descripcion', '').strip()
+    monto_total     = float(form.get('monto_total', 0))
+    categoria       = form.get('categoria', '')
+    pagado_por      = form.get('pagado_por', '') or None
+    mes_inicio      = form.get('mes_inicio', '') + '-01'
+    meses_diferidos = int(form.get('meses_diferidos', 1))
+    notas           = form.get('notas', '').strip()
+    if pagado_por not in ('persona1', 'persona2'):
+        pagado_por = None
+    result = await db_run(env.DB, """
         INSERT INTO gastos (descripcion, monto_total, categoria, pagado_por,
                             mes_inicio, meses_diferidos, notas, creado_por)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, [descripcion, monto_total, categoria, pagador, mes, meses_diferidos, notas, user['id']])
-    return RedirectResponse(f"/gastos/{result['last_row_id']}", status_code=302)
+    """, [descripcion, monto_total, categoria, pagado_por,
+          mes_inicio, meses_diferidos, notas, user['id']])
+    return redirect(f"/gastos/{result['last_row_id']}")
 
 
-@app.get("/gastos/{gasto_id}", response_class=HTMLResponse)
-async def gastos_detalle(request: Request, gasto_id: int, user=Depends(require_user)):
-    db    = get_db(request)
-    cfg   = await get_config(db)
-    gasto = await db_fetch_one(db, "SELECT * FROM gastos WHERE id = ?", [gasto_id])
-    if not gasto:
-        return RedirectResponse("/gastos", status_code=302)
-    abonos   = await db_fetch_all(db,
+@router.get('/gastos/{gasto_id}')
+async def gastos_detalle(request, env, gasto_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg   = await get_config(env.DB)
+    gasto = await db_fetch_one(env.DB, "SELECT * FROM gastos WHERE id = ?", [gasto_id])
+    if not gasto: return redirect('/gastos')
+    abonos   = await db_fetch_all(env.DB,
         "SELECT * FROM abonos_gasto WHERE gasto_id = ? ORDER BY fecha_registro", [gasto_id])
     abono_p1 = sum(float(a['monto']) for a in abonos if a['persona'] == 'persona1')
     abono_p2 = sum(float(a['monto']) for a in abonos if a['persona'] == 'persona2')
-    return templates.TemplateResponse("gastos/detalle.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "gasto": gasto, "abonos": abonos,
-        "abono_p1": abono_p1, "abono_p2": abono_p2,
-    })
+    return html(render('gastos/detalle.html', user=user, cfg=cfg, gasto=gasto,
+                       abonos=abonos, abono_p1=abono_p1, abono_p2=abono_p2))
 
 
-@app.get("/gastos/{gasto_id}/editar", response_class=HTMLResponse)
-async def gastos_editar_get(request: Request, gasto_id: int, user=Depends(require_user)):
-    db    = get_db(request)
-    cfg   = await get_config(db)
-    gasto = await db_fetch_one(db, "SELECT * FROM gastos WHERE id = ?", [gasto_id])
-    if not gasto:
-        return RedirectResponse("/gastos", status_code=302)
+@router.get('/gastos/{gasto_id}/editar')
+async def gastos_editar_get(request, env, gasto_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg   = await get_config(env.DB)
+    gasto = await db_fetch_one(env.DB, "SELECT * FROM gastos WHERE id = ?", [gasto_id])
+    if not gasto: return redirect('/gastos')
     gasto['mes_inicio_str'] = gasto['mes_inicio'][:7]
-    return templates.TemplateResponse("gastos/form.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "categorias": CATEGORIAS, "gasto": gasto, "editando": True,
-    })
+    return html(render('gastos/form.html', user=user, cfg=cfg,
+                       categorias=CATEGORIAS, gasto=gasto, editando=True))
 
 
-@app.post("/gastos/{gasto_id}/editar")
-async def gastos_editar_post(request: Request, gasto_id: int, user=Depends(require_user),
-    descripcion: str = Form(...), monto_total: float = Form(...),
-    categoria: str = Form(...), pagado_por: str = Form(""),
-    mes_inicio: str = Form(...), meses_diferidos: int = Form(1),
-    notas: str = Form("")):
-    db     = get_db(request)
-    pagador = pagado_por if pagado_por in ('persona1','persona2') else None
-    mes     = mes_inicio + "-01"
-    await db_run(db, """
+@router.post('/gastos/{gasto_id}/editar')
+async def gastos_editar_post(request, env, gasto_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    form            = await parse_form(request)
+    pagado_por      = form.get('pagado_por', '') or None
+    if pagado_por not in ('persona1', 'persona2'):
+        pagado_por = None
+    await db_run(env.DB, """
         UPDATE gastos SET descripcion=?, monto_total=?, categoria=?, pagado_por=?,
             mes_inicio=?, meses_diferidos=?, notas=? WHERE id=?
-    """, [descripcion, monto_total, categoria, pagador, mes, meses_diferidos, notas, gasto_id])
-    return RedirectResponse(f"/gastos/{gasto_id}", status_code=302)
+    """, [form.get('descripcion','').strip(), float(form.get('monto_total',0)),
+          form.get('categoria',''), pagado_por,
+          form.get('mes_inicio','') + '-01', int(form.get('meses_diferidos',1)),
+          form.get('notas','').strip(), gasto_id])
+    return redirect(f'/gastos/{gasto_id}')
 
 
-@app.post("/gastos/{gasto_id}/eliminar")
-async def gastos_eliminar(request: Request, gasto_id: int, user=Depends(require_user)):
-    db = get_db(request)
-    await db_run(db, "DELETE FROM gastos WHERE id = ?", [gasto_id])
-    return RedirectResponse("/gastos", status_code=302)
+@router.post('/gastos/{gasto_id}/eliminar')
+async def gastos_eliminar(request, env, gasto_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    await db_run(env.DB, "DELETE FROM gastos WHERE id = ?", [gasto_id])
+    return redirect('/gastos')
 
 
-@app.post("/gastos/{gasto_id}/abonos/nuevo")
-async def abono_nuevo(request: Request, gasto_id: int, user=Depends(require_user),
-    persona: str = Form(...), monto: float = Form(...), notas: str = Form("")):
-    db = get_db(request)
-    await db_run(db, """
+@router.post('/gastos/{gasto_id}/abonos/nuevo')
+async def abono_nuevo(request, env, gasto_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    form = await parse_form(request)
+    await db_run(env.DB, """
         INSERT INTO abonos_gasto (gasto_id, persona, monto, notas, creado_por)
         VALUES (?, ?, ?, ?, ?)
-    """, [gasto_id, persona, monto, notas, user['id']])
-    return RedirectResponse(f"/gastos/{gasto_id}", status_code=302)
+    """, [gasto_id, form.get('persona'), float(form.get('monto',0)),
+          form.get('notas','').strip(), user['id']])
+    return redirect(f'/gastos/{gasto_id}')
 
 
-@app.post("/gastos/{gasto_id}/abonos/{abono_id}/eliminar")
-async def abono_eliminar(request: Request, gasto_id: int, abono_id: int,
-                         user=Depends(require_user)):
-    db = get_db(request)
-    await db_run(db, "DELETE FROM abonos_gasto WHERE id = ? AND gasto_id = ?", [abono_id, gasto_id])
-    return RedirectResponse(f"/gastos/{gasto_id}", status_code=302)
+@router.post('/gastos/{gasto_id}/abonos/{abono_id}/eliminar')
+async def abono_eliminar(request, env, gasto_id, abono_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    await db_run(env.DB, "DELETE FROM abonos_gasto WHERE id = ? AND gasto_id = ?",
+                 [abono_id, gasto_id])
+    return redirect(f'/gastos/{gasto_id}')
 
 
-# ── Pagos extra ────────────────────────────────────────────────────────────────
+# ── Pagos Extra ────────────────────────────────────────────────────────────────
 
-@app.get("/pagos-extra", response_class=HTMLResponse)
-async def pagos_extra_lista(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    pagos = await db_fetch_all(db, """
+@router.get('/pagos-extra')
+async def pagos_extra_lista(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg   = await get_config(env.DB)
+    pagos = await db_fetch_all(env.DB, """
         SELECT p.*, u.nombre AS registrado_por_nombre
         FROM pagos_extra p JOIN usuarios u ON p.creado_por = u.id
         ORDER BY p.mes DESC, p.fecha_registro DESC
     """)
-    return templates.TemplateResponse("pagos_extra/lista.html", {
-        "request": request, "user": user, "cfg": cfg, "pagos": pagos,
-    })
+    return html(render('pagos_extra/lista.html', user=user, cfg=cfg, pagos=pagos))
 
 
-@app.get("/pagos-extra/nuevo", response_class=HTMLResponse)
-async def pagos_extra_nuevo_get(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    return templates.TemplateResponse("pagos_extra/form.html", {
-        "request": request, "user": user, "cfg": cfg, "pago": None,
-    })
+@router.get('/pagos-extra/nuevo')
+async def pagos_extra_nuevo_get(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg = await get_config(env.DB)
+    return html(render('pagos_extra/form.html', user=user, cfg=cfg, pago=None, editando=False))
 
 
-@app.post("/pagos-extra/nuevo")
-async def pagos_extra_nuevo_post(request: Request, user=Depends(require_user),
-    descripcion: str = Form(...), monto: float = Form(...),
-    pagado_por: str = Form(...), recibido_por: str = Form(...),
-    mes: str = Form(...), notas: str = Form("")):
-    db = get_db(request)
-    await db_run(db, """
+@router.post('/pagos-extra/nuevo')
+async def pagos_extra_nuevo_post(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    form = await parse_form(request)
+    await db_run(env.DB, """
         INSERT INTO pagos_extra (descripcion, monto, pagado_por, recibido_por, mes, notas, creado_por)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, [descripcion, monto, pagado_por, recibido_por, mes + "-01", notas, user['id']])
-    return RedirectResponse("/pagos-extra", status_code=302)
+    """, [form.get('descripcion','').strip(), float(form.get('monto',0)),
+          form.get('pagado_por'), form.get('recibido_por'),
+          form.get('mes','') + '-01', form.get('notas','').strip(), user['id']])
+    return redirect('/pagos-extra')
 
 
-@app.get("/pagos-extra/{pago_id}/editar", response_class=HTMLResponse)
-async def pagos_extra_editar_get(request: Request, pago_id: int, user=Depends(require_user)):
-    db   = get_db(request)
-    cfg  = await get_config(db)
-    pago = await db_fetch_one(db, "SELECT * FROM pagos_extra WHERE id = ?", [pago_id])
-    if not pago:
-        return RedirectResponse("/pagos-extra", status_code=302)
+@router.get('/pagos-extra/{pago_id}/editar')
+async def pagos_extra_editar_get(request, env, pago_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg  = await get_config(env.DB)
+    pago = await db_fetch_one(env.DB, "SELECT * FROM pagos_extra WHERE id = ?", [pago_id])
+    if not pago: return redirect('/pagos-extra')
     pago['mes_str'] = pago['mes'][:7]
-    return templates.TemplateResponse("pagos_extra/form.html", {
-        "request": request, "user": user, "cfg": cfg, "pago": pago, "editando": True,
-    })
+    return html(render('pagos_extra/form.html', user=user, cfg=cfg, pago=pago, editando=True))
 
 
-@app.post("/pagos-extra/{pago_id}/editar")
-async def pagos_extra_editar_post(request: Request, pago_id: int, user=Depends(require_user),
-    descripcion: str = Form(...), monto: float = Form(...),
-    pagado_por: str = Form(...), recibido_por: str = Form(...),
-    mes: str = Form(...), notas: str = Form("")):
-    db = get_db(request)
-    await db_run(db, """
+@router.post('/pagos-extra/{pago_id}/editar')
+async def pagos_extra_editar_post(request, env, pago_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    form = await parse_form(request)
+    await db_run(env.DB, """
         UPDATE pagos_extra SET descripcion=?, monto=?, pagado_por=?,
             recibido_por=?, mes=?, notas=? WHERE id=?
-    """, [descripcion, monto, pagado_por, recibido_por, mes + "-01", notas, pago_id])
-    return RedirectResponse("/pagos-extra", status_code=302)
+    """, [form.get('descripcion','').strip(), float(form.get('monto',0)),
+          form.get('pagado_por'), form.get('recibido_por'),
+          form.get('mes','') + '-01', form.get('notas','').strip(), pago_id])
+    return redirect('/pagos-extra')
 
 
-@app.post("/pagos-extra/{pago_id}/eliminar")
-async def pagos_extra_eliminar(request: Request, pago_id: int, user=Depends(require_user)):
-    db = get_db(request)
-    await db_run(db, "DELETE FROM pagos_extra WHERE id = ?", [pago_id])
-    return RedirectResponse("/pagos-extra", status_code=302)
+@router.post('/pagos-extra/{pago_id}/eliminar')
+async def pagos_extra_eliminar(request, env, pago_id):
+    user, err = await require_user(request, env)
+    if err: return err
+    await db_run(env.DB, "DELETE FROM pagos_extra WHERE id = ?", [pago_id])
+    return redirect('/pagos-extra')
 
 
 # ── Descargas ──────────────────────────────────────────────────────────────────
 
-@app.get("/descargas", response_class=HTMLResponse)
-async def descargas_index(request: Request, user=Depends(require_user)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    hoy = date.today()
-    return templates.TemplateResponse("descargas/index.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "meses": meses_disponibles(),
-        "year_sel": hoy.year, "month_sel": hoy.month,
-    })
+@router.get('/descargas')
+async def descargas_index(request, env):
+    user, err = await require_user(request, env)
+    if err: return err
+    cfg = await get_config(env.DB)
+    hoy = Date.today()
+    return html(render('descargas/index.html', user=user, cfg=cfg,
+                       meses=meses_disponibles(),
+                       year_sel=hoy.year, month_sel=hoy.month))
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
 
-@app.get("/admin/usuarios", response_class=HTMLResponse)
-async def admin_usuarios(request: Request, user=Depends(require_admin)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    lista = await db_fetch_all(db,
+@router.get('/admin/usuarios')
+async def admin_usuarios(request, env):
+    user, err = await require_admin(request, env)
+    if err: return err
+    cfg   = await get_config(env.DB)
+    lista = await db_fetch_all(env.DB,
         "SELECT id, nombre, username, rol, persona, activo, fecha_creacion FROM usuarios ORDER BY fecha_creacion")
-    return templates.TemplateResponse("admin/usuarios.html", {
-        "request": request, "user": user, "cfg": cfg, "usuarios": lista,
-    })
+    return html(render('admin/usuarios.html', user=user, cfg=cfg, usuarios=lista))
 
 
-@app.get("/admin/usuarios/nuevo", response_class=HTMLResponse)
-async def admin_nuevo_usuario_get(request: Request, user=Depends(require_admin)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    return templates.TemplateResponse("admin/form_usuario.html", {
-        "request": request, "user": user, "cfg": cfg, "usuario": None,
-    })
+@router.get('/admin/usuarios/nuevo')
+async def admin_nuevo_get(request, env):
+    user, err = await require_admin(request, env)
+    if err: return err
+    cfg = await get_config(env.DB)
+    return html(render('admin/form_usuario.html', user=user, cfg=cfg, usuario=None, editando=False))
 
 
-@app.post("/admin/usuarios/nuevo")
-async def admin_nuevo_usuario_post(request: Request, user=Depends(require_admin),
-    nombre: str = Form(...), username: str = Form(...), password: str = Form(...),
-    rol: str = Form("usuario"), persona: str = Form("")):
-    db      = get_db(request)
-    pw_hash = hash_password(password)
-    persona_val = persona if persona in ('persona1','persona2') else None
+@router.post('/admin/usuarios/nuevo')
+async def admin_nuevo_post(request, env):
+    user, err = await require_admin(request, env)
+    if err: return err
+    form        = await parse_form(request)
+    persona_val = form.get('persona','') if form.get('persona') in ('persona1','persona2') else None
+    pw_hash     = hash_password(form.get('password',''))
     try:
-        await db_run(db, """
+        await db_run(env.DB, """
             INSERT INTO usuarios (nombre, username, password_hash, rol, persona)
             VALUES (?, ?, ?, ?, ?)
-        """, [nombre, username.lower(), pw_hash, rol, persona_val])
+        """, [form.get('nombre','').strip(), form.get('username','').strip().lower(),
+              pw_hash, form.get('rol','usuario'), persona_val])
     except Exception:
-        cfg = await get_config(db)
-        return templates.TemplateResponse("admin/form_usuario.html", {
-            "request": request, "user": user, "cfg": cfg,
-            "usuario": None, "error": "El nombre de usuario ya está en uso.",
-        })
-    return RedirectResponse("/admin/usuarios", status_code=302)
+        cfg = await get_config(env.DB)
+        return html(render('admin/form_usuario.html', user=user, cfg=cfg,
+                           usuario=form, editando=False,
+                           error='El nombre de usuario ya está en uso.'))
+    return redirect('/admin/usuarios')
 
 
-@app.get("/admin/usuarios/{uid}/editar", response_class=HTMLResponse)
-async def admin_editar_usuario_get(request: Request, uid: int, user=Depends(require_admin)):
-    db      = get_db(request)
-    cfg     = await get_config(db)
-    usuario = await db_fetch_one(db,
+@router.get('/admin/usuarios/{uid}/editar')
+async def admin_editar_get(request, env, uid):
+    user, err = await require_admin(request, env)
+    if err: return err
+    cfg     = await get_config(env.DB)
+    usuario = await db_fetch_one(env.DB,
         "SELECT id, nombre, username, rol, persona, activo FROM usuarios WHERE id = ?", [uid])
-    if not usuario:
-        return RedirectResponse("/admin/usuarios", status_code=302)
-    return templates.TemplateResponse("admin/form_usuario.html", {
-        "request": request, "user": user, "cfg": cfg,
-        "usuario": usuario, "editando": True,
-    })
+    if not usuario: return redirect('/admin/usuarios')
+    return html(render('admin/form_usuario.html', user=user, cfg=cfg,
+                       usuario=usuario, editando=True))
 
 
-@app.post("/admin/usuarios/{uid}/editar")
-async def admin_editar_usuario_post(request: Request, uid: int, user=Depends(require_admin),
-    nombre: str = Form(...), username: str = Form(...), password: str = Form(""),
-    rol: str = Form("usuario"), persona: str = Form(""), activo: str = Form("")):
-    db          = get_db(request)
-    persona_val = persona if persona in ('persona1','persona2') else None
-    activo_val  = 1 if activo else 0
+@router.post('/admin/usuarios/{uid}/editar')
+async def admin_editar_post(request, env, uid):
+    user, err = await require_admin(request, env)
+    if err: return err
+    form        = await parse_form(request)
+    persona_val = form.get('persona','') if form.get('persona') in ('persona1','persona2') else None
+    activo_val  = 1 if form.get('activo') else 0
+    password    = form.get('password','').strip()
     if password:
         pw_hash = hash_password(password)
-        await db_run(db, """
+        await db_run(env.DB, """
             UPDATE usuarios SET nombre=?, username=?, rol=?, persona=?, activo=?, password_hash=?
             WHERE id=?
-        """, [nombre, username.lower(), rol, persona_val, activo_val, pw_hash, uid])
+        """, [form.get('nombre','').strip(), form.get('username','').strip().lower(),
+              form.get('rol','usuario'), persona_val, activo_val, pw_hash, uid])
     else:
-        await db_run(db, """
+        await db_run(env.DB, """
             UPDATE usuarios SET nombre=?, username=?, rol=?, persona=?, activo=? WHERE id=?
-        """, [nombre, username.lower(), rol, persona_val, activo_val, uid])
-    return RedirectResponse("/admin/usuarios", status_code=302)
+        """, [form.get('nombre','').strip(), form.get('username','').strip().lower(),
+              form.get('rol','usuario'), persona_val, activo_val, uid])
+    return redirect('/admin/usuarios')
 
 
-@app.post("/admin/usuarios/{uid}/eliminar")
-async def admin_eliminar_usuario(request: Request, uid: int, user=Depends(require_admin)):
-    if uid == user['id']:
-        return RedirectResponse("/admin/usuarios", status_code=302)
-    db = get_db(request)
-    await db_run(db, "DELETE FROM usuarios WHERE id = ?", [uid])
-    return RedirectResponse("/admin/usuarios", status_code=302)
+@router.post('/admin/usuarios/{uid}/eliminar')
+async def admin_eliminar(request, env, uid):
+    user, err = await require_admin(request, env)
+    if err: return err
+    if str(uid) != str(user['id']):
+        await db_run(env.DB, "DELETE FROM usuarios WHERE id = ?", [uid])
+    return redirect('/admin/usuarios')
 
 
-@app.get("/admin/configuracion", response_class=HTMLResponse)
-async def admin_config_get(request: Request, user=Depends(require_admin)):
-    db  = get_db(request)
-    cfg = await get_config(db)
-    return templates.TemplateResponse("admin/configuracion.html", {
-        "request": request, "user": user, "cfg": cfg,
-    })
+@router.get('/admin/configuracion')
+async def admin_config_get(request, env):
+    user, err = await require_admin(request, env)
+    if err: return err
+    cfg = await get_config(env.DB)
+    return html(render('admin/configuracion.html', user=user, cfg=cfg))
 
 
-@app.post("/admin/configuracion")
-async def admin_config_post(request: Request, user=Depends(require_admin),
-    nombre_persona1: str = Form(...), nombre_persona2: str = Form(...)):
-    db = get_db(request)
-    await db_run(db,
+@router.post('/admin/configuracion')
+async def admin_config_post(request, env):
+    user, err = await require_admin(request, env)
+    if err: return err
+    form = await parse_form(request)
+    await db_run(env.DB,
         "UPDATE configuracion SET nombre_persona1=?, nombre_persona2=? WHERE id=1",
-        [nombre_persona1, nombre_persona2])
-    return RedirectResponse("/admin/configuracion", status_code=302)
+        [form.get('nombre_persona1','Ana'), form.get('nombre_persona2','Luis')])
+    return redirect('/admin/configuracion')
 
 
-# ── Script crear admin (solo en desarrollo) ────────────────────────────────────
+# ── Setup primer admin ─────────────────────────────────────────────────────────
 
-@app.get("/setup/crear-admin", response_class=HTMLResponse)
-async def setup_crear_admin_get(request: Request):
-    db    = get_db(request)
-    count = await db_fetch_one(db, "SELECT COUNT(*) as n FROM usuarios")
+@router.get('/setup/crear-admin')
+async def setup_get(request, env):
+    count = await db_fetch_one(env.DB, "SELECT COUNT(*) as n FROM usuarios")
     if count and count['n'] > 0:
-        raise HTTPException(status_code=403, detail="Ya existen usuarios. Ruta deshabilitada.")
-    return templates.TemplateResponse("setup/crear_admin.html", {"request": request})
+        return redirect('/login')
+    return html(render('setup/crear_admin.html'))
 
 
-@app.post("/setup/crear-admin")
-async def setup_crear_admin_post(request: Request,
-    nombre: str = Form(...), username: str = Form(...), password: str = Form(...)):
-    db    = get_db(request)
-    count = await db_fetch_one(db, "SELECT COUNT(*) as n FROM usuarios")
+@router.post('/setup/crear-admin')
+async def setup_post(request, env):
+    count = await db_fetch_one(env.DB, "SELECT COUNT(*) as n FROM usuarios")
     if count and count['n'] > 0:
-        raise HTTPException(status_code=403, detail="Ya existen usuarios.")
-    pw_hash = hash_password(password)
-    await db_run(db, """
+        return redirect('/login')
+    form    = await parse_form(request)
+    pw_hash = hash_password(form.get('password',''))
+    await db_run(env.DB, """
         INSERT INTO usuarios (nombre, username, password_hash, rol, activo)
         VALUES (?, ?, ?, 'admin', 1)
-    """, [nombre, username.lower(), pw_hash])
-    return RedirectResponse("/login", status_code=302)
+    """, [form.get('nombre','').strip(), form.get('username','').strip().lower(), pw_hash])
+    return redirect('/login')
+
+
+# ── Entry point de Cloudflare Workers ─────────────────────────────────────────
+
+async def on_fetch(request, env):
+    try:
+        response = await router.dispatch(request, env)
+        return response.to_js_response()
+    except Exception as e:
+        body = f"<h1>Error interno</h1><pre>{e}</pre>"
+        return Response(body, status=500).to_js_response()

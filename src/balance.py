@@ -1,20 +1,25 @@
 """
 Lógica de cálculo de balance mensual y acumulado.
-Idéntica a la versión Flask, adaptada para async + D1.
+Solo usa stdlib de Python.
 """
 from datetime import date
-from src.db import db_fetch_all, db_fetch_one, get_config
+from src.db import db_fetch_all, get_config
 
 
 def primer_dia_mes(year: int, month: int) -> str:
     return f"{year:04d}-{month:02d}-01"
 
 
+def mes_label(year: int, month: int) -> str:
+    MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+             'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+    return f"{MESES[month - 1]} {year}"
+
+
 async def calcular_balance_mes(db, year: int, month: int) -> dict:
     mes_actual = primer_dia_mes(year, month)
     cfg = await get_config(db)
 
-    # Gastos con abonos agregados
     gastos_raw = await db_fetch_all(db, """
         SELECT g.id, g.descripcion, g.monto_total, g.categoria, g.pagado_por,
                g.mes_inicio, g.meses_diferidos,
@@ -28,8 +33,7 @@ async def calcular_balance_mes(db, year: int, month: int) -> dict:
     """, [mes_actual, mes_actual])
 
     gastos_mes = []
-    total_p1 = 0.0
-    total_p2 = 0.0
+    total_p1 = total_p2 = 0.0
 
     for g in gastos_raw:
         cuota    = round(float(g['monto_total']) / g['meses_diferidos'], 2)
@@ -38,41 +42,29 @@ async def calcular_balance_mes(db, year: int, month: int) -> dict:
         abono_p2 = round(float(g['abono_p2']) / g['meses_diferidos'], 2)
 
         if abono_p1 > 0 or abono_p2 > 0:
-            pago_p1 = abono_p1
-            pago_p2 = abono_p2
+            pago_p1, pago_p2 = abono_p1, abono_p2
         elif g['pagado_por'] == 'persona1':
-            pago_p1 = cuota
-            pago_p2 = 0.0
+            pago_p1, pago_p2 = cuota, 0.0
         elif g['pagado_por'] == 'persona2':
-            pago_p1 = 0.0
-            pago_p2 = cuota
+            pago_p1, pago_p2 = 0.0, cuota
         else:
-            pago_p1 = 0.0
-            pago_p2 = 0.0
+            pago_p1, pago_p2 = 0.0, 0.0
 
         gastos_mes.append({
-            'id':              g['id'],
-            'descripcion':     g['descripcion'],
-            'categoria':       g['categoria'],
-            'pagado_por':      g['pagado_por'],
-            'monto_total':     float(g['monto_total']),
-            'meses_diferidos': g['meses_diferidos'],
-            'cuota_mes':       cuota,
-            'mitad':           mitad,
-            'abono_p1':        abono_p1,
-            'abono_p2':        abono_p2,
-            'pago_p1':         pago_p1,
-            'pago_p2':         pago_p2,
-            'tiene_abonos':    abono_p1 > 0 or abono_p2 > 0,
+            'id': g['id'], 'descripcion': g['descripcion'],
+            'categoria': g['categoria'], 'pagado_por': g['pagado_por'],
+            'monto_total': float(g['monto_total']), 'meses_diferidos': g['meses_diferidos'],
+            'cuota_mes': cuota, 'mitad': mitad,
+            'abono_p1': abono_p1, 'abono_p2': abono_p2,
+            'pago_p1': pago_p1, 'pago_p2': pago_p2,
+            'tiene_abonos': abono_p1 > 0 or abono_p2 > 0,
         })
         total_p1 += pago_p1
         total_p2 += pago_p2
 
-    # Pagos extra del mes
-    pagos_extra = await db_fetch_all(db, """
-        SELECT descripcion, monto, pagado_por, recibido_por, notas
-        FROM pagos_extra WHERE mes = ?
-    """, [mes_actual])
+    pagos_extra = await db_fetch_all(db,
+        "SELECT descripcion, monto, pagado_por, recibido_por, notas FROM pagos_extra WHERE mes = ?",
+        [mes_actual])
 
     extra_p1 = sum(float(p['monto']) for p in pagos_extra if p['pagado_por'] == 'persona1')
     extra_p2 = sum(float(p['monto']) for p in pagos_extra if p['pagado_por'] == 'persona2')
@@ -91,48 +83,33 @@ async def calcular_balance_mes(db, year: int, month: int) -> dict:
         deuda = {'deudor': 'persona2', 'acreedor': 'persona1', 'monto': abs(balance_p2)}
 
     return {
-        'cfg':           cfg,
-        'gastos':        gastos_mes,
-        'pagos_extra':   pagos_extra,
-        'total_p1':      round(total_p1, 2),
-        'total_p2':      round(total_p2, 2),
-        'total_gastado': round(total_gastado, 2),
-        'mitad_total':   mitad_total,
-        'balance_p1':    balance_p1,
-        'balance_p2':    balance_p2,
-        'deuda':         deuda,
-        'extra_p1':      round(extra_p1, 2),
-        'extra_p2':      round(extra_p2, 2),
+        'cfg': cfg, 'gastos': gastos_mes, 'pagos_extra': pagos_extra,
+        'total_p1': round(total_p1, 2), 'total_p2': round(total_p2, 2),
+        'total_gastado': round(total_gastado, 2), 'mitad_total': mitad_total,
+        'balance_p1': balance_p1, 'balance_p2': balance_p2,
+        'deuda': deuda, 'extra_p1': round(extra_p1, 2), 'extra_p2': round(extra_p2, 2),
     }
 
 
 async def calcular_balance_acumulado(db, hasta_year: int, hasta_month: int) -> dict:
-    inicio_year, inicio_month = 2024, 12
     acum_p1 = acum_p2 = acum_total = 0.0
     meses = []
+    y, m  = 2024, 12
 
-    y, m = inicio_year, inicio_month
     while (y, m) <= (hasta_year, hasta_month):
         b = await calcular_balance_mes(db, y, m)
         acum_p1    += b['total_p1']
         acum_p2    += b['total_p2']
         acum_total += b['total_gastado']
-
-        mes_date = date(y, m, 1)
         meses.append({
-            'year':       y,
-            'month':      m,
-            'label':      mes_date.strftime('%B %Y'),
-            'total_p1':   b['total_p1'],
-            'total_p2':   b['total_p2'],
-            'total':      b['total_gastado'],
-            'balance_p1': b['balance_p1'],
-            'balance_p2': b['balance_p2'],
+            'year': y, 'month': m, 'label': mes_label(y, m),
+            'total_p1': b['total_p1'], 'total_p2': b['total_p2'],
+            'total': b['total_gastado'],
+            'balance_p1': b['balance_p1'], 'balance_p2': b['balance_p2'],
         })
-        if m == 12:
+        m += 1
+        if m > 12:
             y, m = y + 1, 1
-        else:
-            m += 1
 
     mitad_acum  = round(acum_total / 2, 2)
     bal_acum_p1 = round(acum_p1 - mitad_acum, 2)
@@ -145,12 +122,8 @@ async def calcular_balance_acumulado(db, hasta_year: int, hasta_month: int) -> d
         deuda_acum = {'deudor': 'persona2', 'acreedor': 'persona1', 'monto': abs(bal_acum_p2)}
 
     return {
-        'acum_p1':     round(acum_p1, 2),
-        'acum_p2':     round(acum_p2, 2),
-        'acum_total':  round(acum_total, 2),
-        'mitad_acum':  mitad_acum,
-        'bal_acum_p1': bal_acum_p1,
-        'bal_acum_p2': bal_acum_p2,
-        'deuda_acum':  deuda_acum,
-        'meses':       meses,
+        'acum_p1': round(acum_p1, 2), 'acum_p2': round(acum_p2, 2),
+        'acum_total': round(acum_total, 2), 'mitad_acum': mitad_acum,
+        'bal_acum_p1': bal_acum_p1, 'bal_acum_p2': bal_acum_p2,
+        'deuda_acum': deuda_acum, 'meses': meses,
     }

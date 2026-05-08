@@ -1,29 +1,29 @@
 """
-Helper para interactuar con Cloudflare D1.
-En Workers, `env.DB` es el binding D1 accesible via JS interop.
+Helper para Cloudflare D1 usando el binding nativo de Workers.
+No requiere librerías externas.
 """
 
 
-async def db_fetch_all(db, query: str, params: list = None) -> list[dict]:
-    """Ejecuta un SELECT y retorna lista de dicts."""
+async def db_fetch_all(db, query: str, params: list = None) -> list:
     params = params or []
-    stmt = db.prepare(query)
+    stmt   = db.prepare(query)
     if params:
         stmt = stmt.bind(*params)
     result = await stmt.all()
-    return [dict(row) for row in (result.results or [])]
+    rows   = result.results
+    if not rows:
+        return []
+    return [dict(row) for row in rows]
 
 
 async def db_fetch_one(db, query: str, params: list = None) -> dict | None:
-    """Ejecuta un SELECT y retorna el primer resultado."""
     rows = await db_fetch_all(db, query, params)
     return rows[0] if rows else None
 
 
 async def db_run(db, query: str, params: list = None) -> dict:
-    """Ejecuta INSERT/UPDATE/DELETE. Retorna meta (last_row_id, changes)."""
     params = params or []
-    stmt = db.prepare(query)
+    stmt   = db.prepare(query)
     if params:
         stmt = stmt.bind(*params)
     result = await stmt.run()
@@ -34,6 +34,6 @@ async def db_run(db, query: str, params: list = None) -> dict:
 
 
 async def get_config(db) -> dict:
-    return await db_fetch_one(db,
-        "SELECT nombre_persona1, nombre_persona2 FROM configuracion WHERE id = 1"
+    return await db_fetch_one(
+        db, "SELECT nombre_persona1, nombre_persona2 FROM configuracion WHERE id = 1"
     )
