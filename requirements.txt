@@ -1,3 +1,0 @@
-# Cloudflare Workers Python (Pyodide) solo soporta stdlib + Jinja2
-# No instalar FastAPI ni otras dependencias externas
-Jinja2==3.1.4

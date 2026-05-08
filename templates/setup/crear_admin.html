@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup — Gastos Pareja</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-icon">⚙️</div>
+      <h1>Configuración inicial</h1>
+      <p>Crea el primer administrador</p>
+    </div>
+    <form method="POST" action="/setup/crear-admin">
+      <div class="form-group"><label>Nombre completo</label><input type="text" name="nombre" required placeholder="Tu nombre"></div>
+      <div class="form-group"><label>Usuario</label><input type="text" name="username" required placeholder="sin espacios"></div>
+      <div class="form-group"><label>Contraseña</label><input type="password" name="password" required placeholder="••••••••"></div>
+      <button type="submit" class="btn btn-primary btn-full">Crear administrador</button>
+    </form>
+    <p style="margin-top:1rem;font-size:.8rem;color:#6b6860;text-align:center">
+      Esta página se deshabilita después de crear el primer usuario.
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[project]
+name = "gastos-pareja"
+version = "0.1.0"
+description = "App para dividir gastos de pareja"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "passlib[bcrypt]",
+    "python-jose[cryptography]",
+    "python-multipart",
+    "openpyxl",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+]

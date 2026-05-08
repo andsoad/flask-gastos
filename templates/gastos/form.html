@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar' if editando else 'Nuevo' }} gasto{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>{{ 'Editar gasto' if editando else 'Nuevo gasto' }}</h2>
+  <a href="{{ url_for('gastos.lista') }}" class="btn btn-secondary">← Volver</a>
+</div>
+
+<div class="form-card">
+  <form method="POST">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="descripcion">Descripción *</label>
+        <input type="text" id="descripcion" name="descripcion" required
+               value="{{ gasto.descripcion if gasto else '' }}" placeholder="Ej: Renta mayo">
+      </div>
+      <div class="form-group">
+        <label for="monto_total">Monto total *</label>
+        <input type="number" id="monto_total" name="monto_total" step="0.01" min="0.01" required
+               value="{{ gasto.monto_total if gasto else '' }}" placeholder="0.00">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="categoria">Categoría *</label>
+        <select id="categoria" name="categoria" required>
+          <option value="">— Selecciona —</option>
+          {% for val, label in categorias %}
+          <option value="{{ val }}" {% if gasto and gasto.categoria == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="pagado_por">¿Quién pagó? <span class="text-muted">(opcional si usarás abonos)</span></label>
+        <select id="pagado_por" name="pagado_por">
+          <option value="">— Sin pagador (usar abonos) —</option>
+          <option value="persona1" {% if gasto and gasto.pagado_por == 'persona1' %}selected{% endif %}>{{ cfg.nombre_persona1 }}</option>
+          <option value="persona2" {% if gasto and gasto.pagado_por == 'persona2' %}selected{% endif %}>{{ cfg.nombre_persona2 }}</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="mes_inicio">Mes de inicio *</label>
+        <input type="month" id="mes_inicio" name="mes_inicio" required
+               value="{{ gasto.mes_inicio_str if editando and gasto else (gasto.mes_inicio if gasto else '') }}"
+               min="2024-12">
+      </div>
+      <div class="form-group">
+        <label for="meses_diferidos">Número de meses (diferidos) *</label>
+        <input type="number" id="meses_diferidos" name="meses_diferidos" min="1" max="60" required
+               value="{{ gasto.meses_diferidos if gasto else 1 }}" id="meses_diferidos">
+      </div>
+    </div>
+
+    <div class="form-group" id="preview-diferido" style="display:none">
+      <div class="info-box">
+        💳 Cuota mensual: <strong id="cuota-val">$0.00</strong>
+        — <strong id="cuota-mitad">$0.00</strong> por persona durante <span id="cuota-meses">1</span> mes(es)
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="notas">Notas (opcional)</label>
+      <textarea id="notas" name="notas" rows="2" placeholder="Comentarios adicionales...">{{ gasto.notas if gasto else '' }}</textarea>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if editando else 'Agregar gasto' }}</button>
+      <a href="{{ url_for('gastos.lista') }}" class="btn btn-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+const montoInput  = document.getElementById('monto_total');
+const mesesInput  = document.getElementById('meses_diferidos');
+const preview     = document.getElementById('preview-diferido');
+const cuotaVal    = document.getElementById('cuota-val');
+const cuotaMitad  = document.getElementById('cuota-mitad');
+const cuotaMeses  = document.getElementById('cuota-meses');
+
+function actualizarPreview() {
+  const monto = parseFloat(montoInput.value) || 0;
+  const meses = parseInt(mesesInput.value) || 1;
+  if (monto > 0 && meses > 0) {
+    const cuota = (monto / meses).toFixed(2);
+    const mitad = (cuota / 2).toFixed(2);
+    cuotaVal.textContent   = '$' + cuota;
+    cuotaMitad.textContent = '$' + mitad;
+    cuotaMeses.textContent = meses;
+    preview.style.display  = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+montoInput.addEventListener('input', actualizarPreview);
+mesesInput.addEventListener('input', actualizarPreview);
+actualizarPreview();
+</script>
+{% endblock %}

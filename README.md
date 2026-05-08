@@ -1,7 +1,6 @@
 # Gastos Pareja 💑 — Cloudflare Workers + D1
 
-Esta rama usa **FastAPI + Cloudflare D1 (SQLite)** en lugar de Flask + MySQL.
-Los templates HTML y la lógica de negocio son idénticos a la rama `main`.
+FastAPI + Cloudflare D1 (SQLite) + pywrangler.
 
 ## Diferencias vs rama `main`
 
@@ -10,77 +9,69 @@ Los templates HTML y la lógica de negocio son idénticos a la rama `main`.
 | Framework | Flask | FastAPI |
 | Base de datos | MySQL | Cloudflare D1 (SQLite) |
 | Auth | Flask-Login (sesiones) | JWT (cookie httponly) |
-| Deploy | passenger_wsgi.py | wrangler deploy |
+| Deploy | passenger_wsgi.py | `uv run pywrangler deploy` |
 | Primer admin | `python crear_admin.py` | `/setup/crear-admin` en el navegador |
 
 ---
 
 ## Requisitos
 
-- Node.js 18+ (para Wrangler CLI)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) instalado
+- Node.js 18+ (para wrangler)
 - Cuenta en Cloudflare (gratis)
-
-```bash
-npm install -g wrangler
-wrangler login
-```
 
 ---
 
 ## Instalación
 
-### 1. Crear la base de datos D1
+### 1. Instalar pywrangler
 
 ```bash
-wrangler d1 create gastos_pareja
+uv tool install workers-py
 ```
 
-Copia el `database_id` que te devuelve y pégalo en `wrangler.toml`:
+### 2. Crear la base de datos D1
+
+```bash
+uv run pywrangler d1 create gastos_pareja
+```
+
+Copia el `database_id` en `wrangler.toml`:
 
 ```toml
 [[d1_databases]]
 binding = "DB"
 database_name = "gastos_pareja"
-database_id = "TU_DATABASE_ID_AQUI"
+database_id = "TU_DATABASE_ID_AQUI"   # ← aquí
 ```
 
-### 2. Crear las tablas
+### 3. Crear las tablas
 
 ```bash
-wrangler d1 execute gastos_pareja --file=schema_d1.sql
+uv run pywrangler d1 execute gastos_pareja --file=schema_d1.sql
 ```
 
-### 3. Configurar variables de entorno
-
-En `wrangler.toml` actualiza:
+### 4. Configurar SECRET_KEY en wrangler.toml
 
 ```toml
 [vars]
-SECRET_KEY = "una_clave_secreta_larga_y_aleatoria"
-```
-
-### 4. Instalar dependencias Python
-
-```bash
-pip install -r requirements.txt
+SECRET_KEY = "una_clave_larga_y_aleatoria"
 ```
 
 ### 5. Probar en local
 
 ```bash
-wrangler dev
+uv run pywrangler dev
 ```
 
 ### 6. Crear el primer admin
 
-Abre en tu navegador: `http://localhost:8787/setup/crear-admin`
-
-Esta ruta se deshabilita automáticamente después de crear el primer usuario.
+Abre `http://localhost:8787/setup/crear-admin` y llena el formulario.
 
 ### 7. Deploy a producción
 
 ```bash
-wrangler deploy
+uv run pywrangler deploy
 ```
 
 Tu app quedará en: `https://gastos-pareja.TU_USUARIO.workers.dev`
@@ -92,19 +83,19 @@ Tu app quedará en: `https://gastos-pareja.TU_USUARIO.workers.dev`
 ```
 gastos_pareja/
 ├── wrangler.toml
-├── schema_d1.sql
-├── requirements.txt
+├── pyproject.toml       # dependencias (pywrangler las empaqueta)
+├── schema_d1.sql        # schema SQLite para D1
 ├── src/
-│   ├── index.py        # FastAPI (todas las rutas)
-│   ├── auth_utils.py   # JWT + passwords
-│   ├── db.py           # Helper D1
-│   └── balance.py      # Lógica de balances
-├── templates/          # Jinja2 (igual que rama main)
-└── static/             # CSS y JS (igual que rama main)
+│   ├── index.py         # FastAPI + WorkerEntrypoint (entry point)
+│   ├── auth_utils.py    # JWT + passwords
+│   ├── db.py            # Helper D1
+│   └── balance.py       # Lógica de balances
+├── templates/           # Jinja2 (igual que rama main)
+└── static/              # CSS y JS (igual que rama main)
 ```
 
-## Plan gratuito de Cloudflare
-- 100,000 requests/día en Workers
+## Plan gratuito de Cloudflare Workers
+- 100,000 requests/día
 - 5 GB en D1
 - HTTPS automático
 - Dominio `.workers.dev` incluido
