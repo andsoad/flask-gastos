@@ -2,7 +2,7 @@
 Gastos Pareja — Cloudflare Workers + FastAPI + D1
 Todo inicializado dentro del fetch handler para minimizar startup CPU.
 """
-from workers import WorkerEntrypoint, Response
+from workers import Response
 import asgi
 
 # Solo imports absolutamente necesarios al nivel de módulo
@@ -389,14 +389,10 @@ def get_app():
     return _app, _templates
 
 
-# ── Entry point de Cloudflare Workers ─────────────────────────────────────────
-
-class Default(WorkerEntrypoint):
-    async def fetch(self, request):
-        app, _ = get_app()
-        return await asgi.fetch(app, request, self.env)
-
-
 async def on_fetch(request, env):
-    app, _ = get_app()
-    return await asgi.fetch(app, request, env)
+    try:
+        app, _ = get_app()
+        return await asgi.fetch(app, request, env)
+    except Exception as e:
+        from workers import Response
+        return Response(f"Error: {e}", status=500)
