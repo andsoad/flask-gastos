@@ -1,15 +1,15 @@
-name = "gastos-pareja"
+name = "gastos"
 main = "src/index.py"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["python_workers"]
 
 [vars]
-SECRET_KEY = "cambia_esto_por_una_clave_secreta"
+SECRET_KEY = "Aliss.102704"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "gastos_pareja"
-database_id = "TU_DATABASE_ID_AQUI"
+database_id = "0468b4ef-5aca-4df2-9fd2-b2f0cb633695"
 
 [assets]
 directory = "./static"
