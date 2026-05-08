@@ -395,3 +395,8 @@ class Default(WorkerEntrypoint):
     async def fetch(self, request):
         app, _ = get_app()
         return await asgi.fetch(app, request, self.env)
+
+
+async def on_fetch(request, env):
+    app, _ = get_app()
+    return await asgi.fetch(app, request, env)
