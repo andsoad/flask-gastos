@@ -14,3 +14,7 @@ dev = [
     "workers-py",
     "workers-runtime-sdk",
 ]
+
+[tool.workers-py]
+# Indica a pywrangler que use el patrón WorkerEntrypoint
+entrypoint = "src/index.py"

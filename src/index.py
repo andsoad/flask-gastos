@@ -2,7 +2,7 @@
 Gastos Pareja — Cloudflare Workers + FastAPI + D1
 Todo inicializado dentro del fetch handler para minimizar startup CPU.
 """
-from workers import WorkerEntrypoint
+from workers import WorkerEntrypoint, Response
 import asgi
 
 # Solo imports absolutamente necesarios al nivel de módulo
