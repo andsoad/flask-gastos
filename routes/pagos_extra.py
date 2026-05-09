@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 from extensions import mysql
+from logger import log_activity, log_error
 
 pagos_extra_bp = Blueprint('pagos_extra', __name__, url_prefix='/pagos-extra')
 
@@ -59,6 +60,8 @@ def nuevo():
         """, (descripcion, monto, pagado_por, recibido_por, mes, notas, current_user.id))
         mysql.connection.commit()
         cur.close()
+        log_activity(current_user.id, current_user.username, 'pago_extra_creado',
+                     f"descripcion={descripcion!r} monto={monto} de={pagado_por} a={recibido_por} mes={mes}")
         flash('Pago extra registrado.', 'success')
         return redirect(url_for('pagos_extra.lista'))
 
@@ -95,6 +98,8 @@ def editar(pago_id):
         """, (descripcion, monto, pagado_por, recibido_por, mes, notas, pago_id))
         mysql.connection.commit()
         cur.close()
+        log_activity(current_user.id, current_user.username, 'pago_extra_editado',
+                     f"id={pago_id} monto={monto}")
         flash('Pago actualizado.', 'success')
         return redirect(url_for('pagos_extra.lista'))
 
@@ -109,5 +114,6 @@ def eliminar(pago_id):
     cur.execute("DELETE FROM pagos_extra WHERE id = %s", (pago_id,))
     mysql.connection.commit()
     cur.close()
+    log_activity(current_user.id, current_user.username, 'pago_extra_eliminado', f"id={pago_id}")
     flash('Pago eliminado.', 'info')
     return redirect(url_for('pagos_extra.lista'))

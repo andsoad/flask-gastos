@@ -4,4 +4,6 @@ __pycache__/
 *.pyo
 venv/
 *.zip
+logs/
+*.log
 .vscode

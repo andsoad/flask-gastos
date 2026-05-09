@@ -94,3 +94,8 @@ CREATE INDEX idx_abonos_gasto ON abonos_gasto(gasto_id);
 CREATE INDEX idx_gastos_mes      ON gastos(mes_inicio);
 CREATE INDEX idx_gastos_cat      ON gastos(categoria);
 CREATE INDEX idx_pagos_extra_mes ON pagos_extra(mes);
+
+-- Logs de actividad (opcional, para referencia desde app)
+-- Los logs principales van a archivos .log en el servidor
+CREATE INDEX IF NOT EXISTS idx_gastos_creado ON gastos(creado_por);
+CREATE INDEX IF NOT EXISTS idx_pagos_extra_creado ON pagos_extra(creado_por);

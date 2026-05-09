@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 from extensions import mysql
+from logger import log_activity, log_error
 
 gastos_bp = Blueprint('gastos', __name__, url_prefix='/gastos')
 
@@ -90,6 +91,8 @@ def nuevo():
         mysql.connection.commit()
         gasto_id = cur.lastrowid
         cur.close()
+        log_activity(current_user.id, current_user.username, 'gasto_creado',
+                     f"id={gasto_id} descripcion={descripcion!r} monto={monto_total} categoria={categoria}")
         flash('Gasto agregado correctamente.', 'success')
         return redirect(url_for('gastos.detalle', gasto_id=gasto_id))
 
@@ -147,6 +150,8 @@ def editar(gasto_id):
               mes_inicio, meses_diferidos, notas, gasto_id))
         mysql.connection.commit()
         cur.close()
+        log_activity(current_user.id, current_user.username, 'gasto_editado',
+                     f"id={gasto_id} descripcion={descripcion!r} monto={monto_total}")
         flash('Gasto actualizado.', 'success')
         return redirect(url_for('gastos.detalle', gasto_id=gasto_id))
 
@@ -161,6 +166,7 @@ def eliminar(gasto_id):
     cur.execute("DELETE FROM gastos WHERE id = %s", (gasto_id,))
     mysql.connection.commit()
     cur.close()
+    log_activity(current_user.id, current_user.username, 'gasto_eliminado', f"id={gasto_id}")
     flash('Gasto eliminado.', 'info')
     return redirect(url_for('gastos.lista'))
 
@@ -185,6 +191,8 @@ def nuevo_abono(gasto_id):
     """, (gasto_id, persona, monto, notas, current_user.id))
     mysql.connection.commit()
     cur.close()
+    log_activity(current_user.id, current_user.username, 'abono_creado',
+                 f"gasto_id={gasto_id} persona={persona} monto={monto}")
     flash('Abono registrado.', 'success')
     return redirect(url_for('gastos.detalle', gasto_id=gasto_id))
 
@@ -196,5 +204,7 @@ def eliminar_abono(gasto_id, abono_id):
     cur.execute("DELETE FROM abonos_gasto WHERE id = %s AND gasto_id = %s", (abono_id, gasto_id))
     mysql.connection.commit()
     cur.close()
+    log_activity(current_user.id, current_user.username, 'abono_eliminado',
+                 f"abono_id={abono_id} gasto_id={gasto_id}")
     flash('Abono eliminado.', 'info')
     return redirect(url_for('gastos.detalle', gasto_id=gasto_id))

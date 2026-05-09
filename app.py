@@ -37,6 +37,19 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(descargas_bp)
 
+    # ── Manejador global de errores ────────────────────────────────────────────
+    from logger import log_error
+    from flask import render_template
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        log_error("Error 500 interno", e)
+        return render_template('errors/500.html'), 500
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return render_template('errors/404.html'), 404
+
     return app
 
 app = create_app()

@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from extensions import mysql
 from functools import wraps
+from logger import log_activity, log_error
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -54,9 +55,12 @@ def nuevo_usuario():
             """, (nombre, username, pw_hash, rol, persona))
             mysql.connection.commit()
             cur.close()
+            log_activity(current_user.id, current_user.username, 'usuario_creado',
+                         f"nuevo_usuario={username!r} rol={rol}")
             flash(f'Usuario {nombre} creado.', 'success')
             return redirect(url_for('admin.usuarios'))
         except Exception as e:
+            log_error(f"Error creando usuario username={username!r}", e)
             flash('El nombre de usuario ya está en uso.', 'danger')
 
     return render_template('admin/form_usuario.html', cfg=cfg, usuario=None)
@@ -98,6 +102,8 @@ def editar_usuario(uid):
             """, (nombre, username, rol, persona, activo, uid))
         mysql.connection.commit()
         cur.close()
+        log_activity(current_user.id, current_user.username, 'usuario_editado',
+                     f"uid={uid} username={username!r} rol={rol} activo={activo}")
         flash('Usuario actualizado.', 'success')
         return redirect(url_for('admin.usuarios'))
 
@@ -115,6 +121,7 @@ def eliminar_usuario(uid):
     cur.execute("DELETE FROM usuarios WHERE id = %s", (uid,))
     mysql.connection.commit()
     cur.close()
+    log_activity(current_user.id, current_user.username, 'usuario_eliminado', f"uid={uid}")
     flash('Usuario eliminado.', 'info')
     return redirect(url_for('admin.usuarios'))
 
