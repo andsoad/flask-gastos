@@ -6,4 +6,8 @@ venv/
 *.zip
 logs/
 *.log
+.well-known/
+tmp/
+cgi-bin/
+public/
 .vscode
