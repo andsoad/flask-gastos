@@ -101,7 +101,7 @@
       <tr>
         <td>{{ g.descripcion }}</td>
         <td><span class="badge badge-cat">{{ g.categoria }}</span></td>
-        <td>{{ cfg['nombre_' + g.pagado_por] }}</td>
+        <td>{{ cfg['nombre_' + g.pagado_por] if g.pagado_por else '<span class="badge badge-abono">Abonos</span>'|safe }}</td>
         <td>${{ "%.2f"|format(g.monto_total) }}</td>
         <td>${{ "%.2f"|format(g.cuota_mes) }}</td>
         <td>{{ g.meses_diferidos }}</td>

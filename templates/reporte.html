@@ -66,7 +66,7 @@
       <tr>
         <td>{{ g.descripcion }}</td>
         <td><span class="badge badge-cat">{{ g.categoria }}</span></td>
-        <td>{{ cfg['nombre_' + g.pagado_por] }}</td>
+        <td>{{ cfg['nombre_' + g.pagado_por] if g.pagado_por else '<span class="badge badge-abono">Abonos</span>'|safe }}</td>
         <td>${{ "%.2f"|format(g.monto_total) }}</td>
         <td>${{ "%.2f"|format(g.cuota_mes) }}</td>
         <td>${{ "%.2f"|format(g.mitad) }}</td>
@@ -90,7 +90,7 @@
       {% for p in balance_mes.pagos_extra %}
       <tr>
         <td>{{ p.descripcion }}</td>
-        <td>{{ cfg['nombre_' + p.pagado_por] }}</td>
+        <td>{{ cfg['nombre_' + p.pagado_por] if p.pagado_por else '—' }}</td>
         <td>{{ cfg['nombre_' + p.recibido_por] }}</td>
         <td>${{ "%.2f"|format(p.monto) }}</td>
         <td class="text-muted">{{ p.notas or '—' }}</td>
