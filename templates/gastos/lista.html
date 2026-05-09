@@ -7,6 +7,41 @@
   <a href="{{ url_for('gastos.nuevo') }}" class="btn btn-primary">+ Nuevo gasto</a>
 </div>
 
+{# ── Filtros ── #}
+<div class="filtros-bar">
+  <div class="filtro-group">
+    <label>Mes</label>
+    <select id="filtro-mes" onchange="aplicarFiltros()">
+      <option value="">Todos los meses</option>
+      {% for m in meses %}
+      <option value="{{ m.mes_key }}" {% if filtro_mes == m.mes_key %}selected{% endif %}>{{ m.mes_label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filtro-group">
+    <label>Categoría</label>
+    <select id="filtro-categoria" onchange="aplicarFiltros()">
+      <option value="">Todas las categorías</option>
+      {% for val, label in categorias %}
+      <option value="{{ val }}" {% if filtro_categoria == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filtro-group">
+    <label>Pagador</label>
+    <select id="filtro-pagador" onchange="aplicarFiltros()">
+      <option value="">Todos</option>
+      <option value="persona1" {% if filtro_pagador == 'persona1' %}selected{% endif %}>{{ cfg.nombre_persona1 }}</option>
+      <option value="persona2" {% if filtro_pagador == 'persona2' %}selected{% endif %}>{{ cfg.nombre_persona2 }}</option>
+      <option value="abonos" {% if filtro_pagador == 'abonos' %}selected{% endif %}>Con abonos</option>
+    </select>
+  </div>
+  {% if filtro_mes or filtro_categoria or filtro_pagador %}
+  <a href="{{ url_for('gastos.lista') }}" class="btn-limpiar">✕ Limpiar filtros</a>
+  {% endif %}
+  <div class="filtro-count">{{ gastos|length }} gasto{{ 's' if gastos|length != 1 }}</div>
+</div>
+
 {% if gastos %}
 <div class="table-wrap">
   <table class="table">
@@ -55,8 +90,25 @@
 </div>
 {% else %}
 <div class="empty-state">
-  <p>No hay gastos registrados aún.</p>
+  <p>No hay gastos con los filtros seleccionados.</p>
+  {% if filtro_mes or filtro_categoria or filtro_pagador %}
+  <a href="{{ url_for('gastos.lista') }}" class="btn btn-secondary">Ver todos los gastos</a>
+  {% else %}
   <a href="{{ url_for('gastos.nuevo') }}" class="btn btn-primary">Agregar el primero</a>
+  {% endif %}
 </div>
 {% endif %}
+
+<script>
+function aplicarFiltros() {
+  const mes       = document.getElementById('filtro-mes').value;
+  const categoria = document.getElementById('filtro-categoria').value;
+  const pagador   = document.getElementById('filtro-pagador').value;
+  const params    = new URLSearchParams();
+  if (mes)       params.set('mes', mes);
+  if (categoria) params.set('categoria', categoria);
+  if (pagador)   params.set('pagado_por', pagador);
+  window.location.href = '{{ url_for("gastos.lista") }}?' + params.toString();
+}
+</script>
 {% endblock %}

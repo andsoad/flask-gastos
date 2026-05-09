@@ -45,8 +45,30 @@ def get_abonos(gasto_id):
 @gastos_bp.route('/')
 @login_required
 def lista():
+    # Filtros desde query string
+    mes_filtro      = request.args.get('mes', '')       # formato YYYY-MM
+    categoria_filtro = request.args.get('categoria', '')
+    pagador_filtro  = request.args.get('pagado_por', '')
+
+    where = []
+    params = []
+
+    if mes_filtro:
+        where.append("DATE_FORMAT(g.mes_inicio, '%%Y-%%m') = %s")
+        params.append(mes_filtro)
+    if categoria_filtro:
+        where.append("g.categoria = %s")
+        params.append(categoria_filtro)
+    if pagador_filtro == 'abonos':
+        where.append("g.pagado_por IS NULL")
+    elif pagador_filtro in ('persona1', 'persona2'):
+        where.append("g.pagado_por = %s")
+        params.append(pagador_filtro)
+
+    where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
+
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT g.*, u.nombre AS registrado_por_nombre,
                c.nombre_persona1, c.nombre_persona2,
                COALESCE(SUM(a.monto), 0) AS total_abonado
@@ -54,13 +76,27 @@ def lista():
         JOIN usuarios u ON g.creado_por = u.id
         JOIN configuracion c ON c.id = 1
         LEFT JOIN abonos_gasto a ON a.gasto_id = g.id
+        {where_sql}
         GROUP BY g.id
         ORDER BY g.mes_inicio DESC, g.fecha_registro DESC
-    """)
+    """, params if params else None)
     gastos = cur.fetchall()
+
+    # Meses disponibles para el selector
+    cur.execute("""
+        SELECT DISTINCT DATE_FORMAT(mes_inicio, '%Y-%m') AS mes_key,
+               DATE_FORMAT(mes_inicio, '%M %Y') AS mes_label
+        FROM gastos
+        ORDER BY mes_inicio DESC
+    """)
+    meses = cur.fetchall()
     cur.close()
+
     cfg = get_config()
-    return render_template('gastos/lista.html', gastos=gastos, categorias=CATEGORIAS, cfg=cfg)
+    return render_template('gastos/lista.html',
+        gastos=gastos, categorias=CATEGORIAS, cfg=cfg, meses=meses,
+        filtro_mes=mes_filtro, filtro_categoria=categoria_filtro,
+        filtro_pagador=pagador_filtro)
 
 
 @gastos_bp.route('/nuevo', methods=['GET', 'POST'])
