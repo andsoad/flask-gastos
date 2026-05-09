@@ -1,8 +1,8 @@
 import sys
 import os
 
-# Ajusta esta ruta al directorio de tu app en el servidor
-INTERP = os.path.join(os.environ['HOME'], 'virtualenv', 'gastos_pareja', '3.11', 'bin', 'python3')
+# Ruta del entorno virtual configurado por cPanel
+INTERP = "/home/studio5/virtualenv/repositories/flask-gastos/3.13/bin/python"
 if sys.executable != INTERP:
     os.execl(INTERP, INTERP, *sys.argv)
 
