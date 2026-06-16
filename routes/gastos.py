@@ -116,7 +116,7 @@ def nuevo():
             flash('Por favor completa todos los campos requeridos.', 'danger')
             return render_template('gastos/form.html', categorias=CATEGORIAS, cfg=cfg, gasto=request.form)
 
-        mes_inicio = mes_inicio_str + '-01'
+        mes_inicio = mes_inicio_str  # ya viene como YYYY-MM-DD del input type="date"
         cur = mysql.connection.cursor()
         cur.execute("""
             INSERT INTO gastos (descripcion, monto_total, categoria, pagado_por,
@@ -175,7 +175,7 @@ def editar(gasto_id):
         mes_inicio_str  = request.form.get('mes_inicio')
         meses_diferidos = int(request.form.get('meses_diferidos', 1))
         notas           = request.form.get('notas', '').strip()
-        mes_inicio      = mes_inicio_str + '-01'
+        mes_inicio      = mes_inicio_str  # ya viene como YYYY-MM-DD del input type="date"
 
         cur = mysql.connection.cursor()
         cur.execute("""
@@ -191,7 +191,7 @@ def editar(gasto_id):
         flash('Gasto actualizado.', 'success')
         return redirect(url_for('gastos.detalle', gasto_id=gasto_id))
 
-    gasto['mes_inicio_str'] = gasto['mes_inicio'].strftime('%Y-%m')
+    gasto['mes_inicio_str'] = gasto['mes_inicio'].strftime('%Y-%m-%d')
     return render_template('gastos/form.html', categorias=CATEGORIAS, cfg=cfg, gasto=gasto, editando=True)
 
 

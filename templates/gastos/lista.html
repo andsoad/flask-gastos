@@ -52,7 +52,7 @@
         <th>Pagó</th>
         <th>Monto total</th>
         <th>Cuota/mes</th>
-        <th>Mes inicio</th>
+        <th>Fecha inicio</th>
         <th>Meses</th>
         <th>Registrado</th>
         <th>Acciones</th>
@@ -73,7 +73,7 @@
         </td>
         <td>${{ "%.2f"|format(g.monto_total) }}</td>
         <td>${{ "%.2f"|format(g.monto_total / g.meses_diferidos) }}</td>
-        <td>{{ g.mes_inicio.strftime('%b %Y') }}</td>
+        <td>{{ g.mes_inicio.strftime('%d/%m/%Y') }}</td>
         <td>{{ g.meses_diferidos }}</td>
         <td class="text-muted">{{ g.fecha_registro.strftime('%d/%m/%Y') }}</td>
         <td class="actions">
